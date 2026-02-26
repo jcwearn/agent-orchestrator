@@ -77,6 +77,10 @@ CREATE INDEX idx_task_logs_task ON task_logs(task_id, step);
 - Create `internal/coder/executor.go` -- runs commands via `coder ssh agent-N -- bash -c "command"`
 - Create `internal/coder/workspace.go` -- workspace pool (agent-1 through agent-4), full lifecycle management
 - Shell out to `coder` CLI (no SDK import needed)
+- **Authentication**: The `coder` CLI authenticates via two environment variables set on the pod:
+  - `CODER_URL` -- Coder deployment URL (e.g. `https://coder.example.com`)
+  - `CODER_SESSION_TOKEN` -- long-lived API token generated via `coder tokens create`
+  - These are injected as env vars (via K8s Secret) and inherited by all `exec.Command` calls — no `coder login` needed.
 - **Status check**: `coder list --output json` to query workspace status before assignment. Parse JSON to determine if a workspace is `running`, `stopped`, `failed`, `starting`, or `stopping`.
 - **Start**: `coder start agent-N --parameter git_repo=<url> --yes` (bypass interactive prompts)
 - **Stop**: `coder stop agent-N --yes` at end of task lifecycle (completion or failure)
