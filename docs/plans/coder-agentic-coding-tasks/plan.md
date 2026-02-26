@@ -39,6 +39,7 @@ CREATE TABLE tasks (
     github_owner    TEXT,
     github_repo     TEXT,
     github_issue    INTEGER,
+    session_id      TEXT NOT NULL,
     workspace_id    TEXT,
     current_step    TEXT,
     plan_comment_id INTEGER,
@@ -74,9 +75,15 @@ CREATE INDEX idx_task_logs_task ON task_logs(task_id, step);
 ### Phase 2: Coder Workspace Executor
 
 - Create `internal/coder/executor.go` -- runs commands via `coder ssh agent-N -- bash -c "command"`
-- Create `internal/coder/workspace.go` -- workspace pool (agent-1 through agent-4), start/stop via `coder start`
+- Create `internal/coder/workspace.go` -- workspace pool (agent-1 through agent-4), full lifecycle management
 - Shell out to `coder` CLI (no SDK import needed)
-- Start workspaces with `git_repo` parameter: `coder start agent-N --parameter git_repo=<url>`
+- **Authentication**: The `coder` CLI authenticates via two environment variables set on the pod:
+  - `CODER_URL` -- Coder deployment URL (e.g. `https://coder.example.com`)
+  - `CODER_SESSION_TOKEN` -- long-lived API token generated via `coder tokens create`
+  - These are injected as env vars (via K8s Secret) and inherited by all `exec.Command` calls — no `coder login` needed.
+- **Status check**: `coder list --output json` to query workspace status before assignment. Parse JSON to determine if a workspace is `running`, `stopped`, `failed`, `starting`, or `stopping`.
+- **Start**: `coder start agent-N --parameter git_repo=<url> --yes` (bypass interactive prompts)
+- **Stop**: `coder stop agent-N --yes` at end of task lifecycle (completion or failure)
 - Stream stdout/stderr to `io.Writer` for real-time log capture
 
 **Files**:
@@ -92,12 +99,14 @@ CREATE INDEX idx_task_logs_task ON task_logs(task_id, step);
 - Create `internal/orchestrator/orchestrator.go` -- background goroutine with tick loop (polls every 5s)
 - Create `internal/orchestrator/queue.go` -- FIFO queue via SQLite status + created_at ordering
 - Create `internal/orchestrator/steps.go` -- plan and implement step execution
-- Two-step workflow:
-  1. **Plan**: SSH into workspace, clone repo, run `claude -p "plan prompt" --print --dangerously-skip-permissions`. Capture output, store as plan.
-  2. **Implement**: After approval, run `claude -p "implement prompt with plan context" --print --dangerously-skip-permissions`. Claude handles branching, coding, testing, committing, pushing, PR creation.
+- **Workspace allocation flow**: Before assigning a workspace, check status via `coder list --output json` to find a `stopped` (available) workspace. Start it with the task's repo URL. After task completes or fails, stop the workspace with `coder stop agent-N --yes`.
+- Two-step workflow using session ID for context continuity:
+  1. **Plan**: SSH into workspace, clone repo, run `claude --session-id <task.session_id> -p "plan prompt" --print --dangerously-skip-permissions`. Capture output, store as plan.
+  2. **Implement**: After approval, run `claude --resume <task.session_id> -p "implement prompt" --print --dangerously-skip-permissions`. Resuming the session preserves the full plan conversation context. Claude handles branching, coding, testing, committing, pushing, PR creation.
+- Session ID continuity enables future PR feedback to resume the same Claude session with `--resume`, preserving full conversation context across the task lifecycle.
 - Workspace pool: 4 slots, FIFO assignment, release on completion/failure
 - Broadcasts WebSocket events at each status transition
-- Task statuses: `queued -> planning -> awaiting_approval -> implementing -> complete/failed`
+- Status flow: `queued -> check workspace status -> start workspace -> planning -> awaiting_approval -> implementing -> stop workspace -> complete/failed`
 
 **Files**:
 - `internal/orchestrator/orchestrator.go`
@@ -159,13 +168,22 @@ GET    /* (embedded web UI, Phase 6)
 
 ### Phase 6: Embedded Web UI (Vite + React)
 
-- Scaffold `web/` directory with Vite + React + TypeScript
-- Dashboard: 4 agent cards showing workspace status (idle/running/awaiting approval)
-- Task list: table with status, repo, prompt, created time, actions
-- Task detail: full prompt, rendered plan (markdown), approval/feedback form, log stream, PR link
-- WebSocket hook for real-time updates
+- Scaffold `web/` directory with Vite + React + TypeScript + **Tailwind CSS** + **shadcn/ui** (Radix primitives)
 - Embed compiled frontend in Go binary via `embed.FS`
 - SPA routing fallback to `index.html`
+
+**Design direction** (Coder-inspired):
+- **Dark mode first**: Near-black background (`zinc-950` / `#09090b`), dark gray surfaces (`zinc-900`, `zinc-800`)
+- **Accent color**: Sky blue (`sky-500` / `#0ea5e9`) for primary actions and links
+- **Status colors**: Green (running), Amber (awaiting approval), Red (failed), Zinc-gray (idle/stopped)
+- **Typography**: Geist (body), IBM Plex Mono (logs/code)
+- **Layout**: Sticky 72px top nav with logo + nav links, full-width content area, max-width ~1380px
+
+**Views**:
+- **Agent dashboard**: Table layout (not cards) with columns: Agent Name, Status, Current Task, Last Active — matching Coder's workspace list pattern with 72px row height
+- **Task list**: Table with status, repo, prompt, created time, actions
+- **Task detail**: Markdown-rendered plan, approval/feedback form, real-time log stream in monospace, PR link
+- **WebSocket hook** (`useWebSocket.ts`) for real-time status updates across all views
 
 **Files**:
 - `web/` -- Vite project
@@ -176,7 +194,7 @@ GET    /* (embedded web UI, Phase 6)
 - `web/src/hooks/useWebSocket.ts`
 - `internal/server/ui.go` -- embed.FS handler
 
-**Acceptance criteria**: Dashboard shows real-time agent status, task list/detail works, plan approval from UI triggers implementation, logs stream in real-time.
+**Acceptance criteria**: Dashboard shows real-time agent status in table layout, task list/detail works, plan approval from UI triggers implementation, logs stream in real-time, dark theme matches design spec.
 
 ---
 

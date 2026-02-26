@@ -13,4 +13,4 @@
 | 7. Build + Deploy | Not Started | — | — |
 
 ## Handoff Notes
-_No sessions completed yet._
+- **2026-02-25**: Plan revised to add three details: (1) workspace lifecycle management with `coder list/start/stop` and `--yes` flags in Phases 2+3, (2) `session_id` column in Phase 1 schema with `--session-id`/`--resume` usage in Phase 3 steps, (3) Coder-inspired UI design direction in Phase 6 (Tailwind + shadcn/ui, dark mode, table layout for agents).
