@@ -198,14 +198,61 @@ GET    /* (embedded web UI, Phase 6)
 
 ---
 
-### Phase 7: Build + Deploy
+### Phase 7: Build, CI/CD + Docker Publishing
 
-- Dockerfile: multi-stage build (Go + Node.js for frontend, slim runtime with `coder` CLI)
-- Makefile: `build`, `test`, `web-build`, `docker-build` targets
-- GitHub Actions CI: lint, test, build image
-- `.gitignore`, `README.md`
+#### 7a. Dockerfile (multi-stage)
 
-**Acceptance criteria**: `go build`, `go test`, and Docker build all succeed. Service runs in container and connects to Coder workspaces.
+- **Build stage**: `golang:1.24` base with Node.js installed for frontend compilation
+  - `web-build`: install npm deps, run `npm run build` in `web/`
+  - `go-build`: embed compiled frontend assets, `CGO_ENABLED=0 go build -o /agent-orchestrator ./cmd/...`
+- **Runtime stage**: `debian:bookworm-slim` with `coder` CLI pre-installed (curl from Coder releases)
+  - Copy compiled binary from build stage
+  - Non-root user, expose port 8080
+
+#### 7b. `.dockerignore`
+
+- Allowlist pattern: deny all (`*`), then permit `cmd/`, `internal/`, `web/`, `go.mod`, `go.sum`, `*.go`
+
+#### 7c. Makefile targets
+
+| Target | Command |
+|--------|---------|
+| `build` | `CGO_ENABLED=0 go build -o bin/agent-orchestrator ./cmd/...` |
+| `test` | `go test ./...` |
+| `lint` | `golangci-lint run ./...` |
+| `web-build` | `cd web && npm ci && npm run build` |
+| `docker-build` | `docker build -t agent-orchestrator .` |
+| `docker-push` | `docker push $(IMAGE)` |
+
+#### 7d. GitHub Actions workflows
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `lint.yml` | PR to main | Run `golangci-lint` via `golangci/golangci-lint-action` |
+| `test.yml` | PR to main | Run `go test ./...` |
+| `build-image.yml` | PR to main | Build Docker image (no push) with GHA cache to validate Dockerfile |
+| `require-release-label.yml` | PR opened / labeled / unlabeled | Ensure exactly one `release:major`, `release:minor`, or `release:patch` label is present |
+| `release.yml` | PR closed (merged) to main | Bump semver from latest tag, create GitHub Release, build + push image to `ghcr.io/<owner>/agent-orchestrator` |
+
+#### 7e. Release workflow details (mirroring agent-operator pattern)
+
+- **Semver bump**: Read latest `v*` git tag, increment major/minor/patch based on the PR's `release:*` label
+- **Image tags**: Full semver (`v1.2.3`), major.minor (`1.2`), short SHA (`sha-abc1234`)
+- **Registry**: `ghcr.io` authenticated via `secrets.GITHUB_TOKEN` with `packages: write` permission
+- **Buildx**: `docker/setup-buildx-action` + `docker/build-push-action@v6` with GHA cache (`type=gha`)
+- **GitHub Release**: Created via `softprops/action-gh-release` (or `gh release create`) with auto-generated notes
+
+**Files**:
+- `Dockerfile`
+- `.dockerignore`
+- `Makefile`
+- `.github/workflows/lint.yml`
+- `.github/workflows/test.yml`
+- `.github/workflows/build-image.yml`
+- `.github/workflows/require-release-label.yml`
+- `.github/workflows/release.yml`
+
+**Acceptance criteria**: `go build`, `go test`, and `docker build` all succeed locally. PR workflows (lint, test, build-image, require-release-label) run on PRs. Merging a labeled PR triggers the release workflow: semver tag is created, GitHub Release is published, Docker image is pushed to `ghcr.io` with correct tags.
 
 ## Verification
 
