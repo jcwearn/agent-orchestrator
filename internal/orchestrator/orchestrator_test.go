@@ -20,7 +20,7 @@ import (
 type mockExecutor struct {
 	mu          sync.Mutex
 	sshFunc     func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error)
-	startFunc   func(ctx context.Context, workspace string) error
+	startFunc   func(ctx context.Context, workspace string, params map[string]string) error
 	stopFunc    func(ctx context.Context, workspace string) error
 	sshCalls    []sshCall
 	startCalls  []string
@@ -38,7 +38,7 @@ func newMockExecutor() *mockExecutor {
 			fmt.Fprint(stdout, "mock plan output")
 			return &coder.SSHResult{ExitCode: 0}, nil
 		},
-		startFunc: func(ctx context.Context, workspace string) error { return nil },
+		startFunc: func(ctx context.Context, workspace string, params map[string]string) error { return nil },
 		stopFunc:  func(ctx context.Context, workspace string) error { return nil },
 	}
 }
@@ -50,11 +50,11 @@ func (m *mockExecutor) SSH(ctx context.Context, workspace, command string, stdou
 	return m.sshFunc(ctx, workspace, command, stdout, stderr)
 }
 
-func (m *mockExecutor) StartWorkspace(ctx context.Context, workspace string) error {
+func (m *mockExecutor) StartWorkspace(ctx context.Context, workspace string, params map[string]string) error {
 	m.mu.Lock()
 	m.startCalls = append(m.startCalls, workspace)
 	m.mu.Unlock()
-	return m.startFunc(ctx, workspace)
+	return m.startFunc(ctx, workspace, params)
 }
 
 func (m *mockExecutor) StopWorkspace(ctx context.Context, workspace string) error {
@@ -234,7 +234,7 @@ func TestRunTask_PlanFailure(t *testing.T) {
 
 func TestRunTask_WorkspaceStartFailure(t *testing.T) {
 	exec := newMockExecutor()
-	exec.startFunc = func(ctx context.Context, workspace string) error {
+	exec.startFunc = func(ctx context.Context, workspace string, params map[string]string) error {
 		return errors.New("workspace start failed")
 	}
 

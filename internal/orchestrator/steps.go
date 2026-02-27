@@ -3,20 +3,23 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
-// stepPlan runs the planning step: clone the repo and invoke Claude CLI to produce a plan.
+// stepPlan invokes Claude CLI to produce a plan. The repo is already cloned
+// by the workspace template via the repo_url parameter.
 func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace string) error {
 	stdout := o.newLogWriter(ctx, task.ID, "plan", "stdout")
 	stderr := o.newLogWriter(ctx, task.ID, "plan", "stderr")
 
+	repoDir := "/home/coder/" + repoName(task.RepoURL)
 	cmd := fmt.Sprintf(
-		"cd /home/coder && git clone %s repo && cd repo && git checkout %s && claude --session-id %s -p %s --print",
-		shellQuote(task.RepoURL),
+		"cd %s && git checkout %s && claude --session-id %s -p %s --print",
+		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
 		shellQuote(task.SessionID),
 		shellQuote(buildPlanPrompt(task)),
@@ -35,14 +38,16 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 	return nil
 }
 
-// stepImplement runs the implementation step: resume the Claude session to implement the approved plan.
+// stepImplement resumes the Claude session to implement the approved plan.
+// The repo is already present from the workspace template.
 func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, workspace string) error {
 	stdout := o.newLogWriter(ctx, task.ID, "implement", "stdout")
 	stderr := o.newLogWriter(ctx, task.ID, "implement", "stderr")
 
+	repoDir := "/home/coder/" + repoName(task.RepoURL)
 	cmd := fmt.Sprintf(
-		"cd /home/coder && git clone %s repo && cd repo && git checkout %s && claude --resume %s -p %s --print",
-		shellQuote(task.RepoURL),
+		"cd %s && git checkout %s && claude --resume %s -p %s --print",
+		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
 		shellQuote(task.SessionID),
 		shellQuote(buildImplementPrompt(task)),
@@ -58,9 +63,11 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 	return nil
 }
 
-// startWorkspace starts the assigned workspace.
+// startWorkspace starts the assigned workspace, passing the repo URL as a
+// template parameter so the workspace clones it on boot.
 func (o *Orchestrator) startWorkspace(ctx context.Context, task *store.Task, workspace string) error {
-	if err := o.executor.StartWorkspace(ctx, workspace); err != nil {
+	params := map[string]string{"repo_url": task.RepoURL}
+	if err := o.executor.StartWorkspace(ctx, workspace, params); err != nil {
 		return fmt.Errorf("start workspace %s: %w", workspace, err)
 	}
 	ws := workspace
@@ -145,6 +152,13 @@ func stringVal(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// repoName extracts the repository name from a URL.
+// e.g. "https://github.com/user/repo.git" → "repo"
+func repoName(repoURL string) string {
+	base := path.Base(repoURL)
+	return strings.TrimSuffix(base, ".git")
 }
 
 // shellQuote wraps a string in single quotes, escaping embedded single quotes.
