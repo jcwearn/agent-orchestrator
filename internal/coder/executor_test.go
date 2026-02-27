@@ -112,14 +112,14 @@ func TestSSH_NonZeroExit(t *testing.T) {
 func TestStartWorkspace(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		e := testExecutor(t)
-		if err := e.StartWorkspace(context.Background(), "ws-1"); err != nil {
+		if err := e.StartWorkspace(context.Background(), "ws-1", nil); err != nil {
 			t.Fatal("unexpected error:", err)
 		}
 	})
 
 	t.Run("failure", func(t *testing.T) {
 		e := testExecutor(t, "FAKE_EXIT_CODE=1", "FAKE_STDERR=workspace not found")
-		err := e.StartWorkspace(context.Background(), "bad-ws")
+		err := e.StartWorkspace(context.Background(), "bad-ws", nil)
 		if err == nil {
 			t.Fatal("expected error")
 		}

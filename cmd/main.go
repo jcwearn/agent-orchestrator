@@ -14,6 +14,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jcwearn/agent-orchestrator/internal/coder"
+	"github.com/jcwearn/agent-orchestrator/internal/orchestrator"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
@@ -44,11 +46,22 @@ func main() {
 	s := store.New(db, logger)
 	defer s.Close()
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	if err := s.RunMigrations(ctx); err != nil {
 		logger.Error("run migrations", "error", err)
 		os.Exit(1)
 	}
+
+	exec := coder.NewExecutor(logger, nil)
+	pool := coder.NewPool(coder.DefaultWorkspaces)
+	orch := orchestrator.New(s, exec, pool, logger, orchestrator.DefaultConfig())
+	go func() {
+		if err := orch.Run(ctx); err != nil && err != context.Canceled {
+			logger.Error("orchestrator error", "error", err)
+		}
+	}()
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -71,9 +84,6 @@ func main() {
 		Addr:    ":" + port,
 		Handler: r,
 	}
-
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		logger.Info("server starting", "port", port)

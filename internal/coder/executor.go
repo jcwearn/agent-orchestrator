@@ -25,7 +25,7 @@ type SSHResult struct {
 // mock-based testing without a real Coder CLI.
 type WorkspaceExecutor interface {
 	SSH(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*SSHResult, error)
-	StartWorkspace(ctx context.Context, workspace string) error
+	StartWorkspace(ctx context.Context, workspace string, params map[string]string) error
 	StopWorkspace(ctx context.Context, workspace string) error
 	ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error)
 }
@@ -64,10 +64,15 @@ func (e *Executor) SSH(ctx context.Context, workspace, command string, stdout, s
 }
 
 // StartWorkspace starts a Coder workspace via `coder start --yes`.
-func (e *Executor) StartWorkspace(ctx context.Context, workspace string) error {
-	cmd := e.newCmd(ctx, "coder", "start", workspace, "--yes")
+// Template parameters (e.g. repo_url) are passed as --parameter key=value flags.
+func (e *Executor) StartWorkspace(ctx context.Context, workspace string, params map[string]string) error {
+	args := []string{"start", workspace, "--yes"}
+	for k, v := range params {
+		args = append(args, "--parameter", k+"="+v)
+	}
+	cmd := e.newCmd(ctx, "coder", args...)
 
-	e.logger.Debug("starting workspace", "workspace", workspace)
+	e.logger.Debug("starting workspace", "workspace", workspace, "params", params)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
