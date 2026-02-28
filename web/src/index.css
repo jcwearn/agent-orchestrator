@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--zinc-950);
+  --color-foreground: var(--zinc-50);
+  --color-card: var(--zinc-900);
+  --color-card-foreground: var(--zinc-50);
+  --color-popover: var(--zinc-900);
+  --color-popover-foreground: var(--zinc-50);
+  --color-primary: var(--sky-500);
+  --color-primary-foreground: var(--zinc-950);
+  --color-secondary: var(--zinc-800);
+  --color-secondary-foreground: var(--zinc-50);
+  --color-muted: var(--zinc-800);
+  --color-muted-foreground: var(--zinc-400);
+  --color-accent: var(--zinc-800);
+  --color-accent-foreground: var(--zinc-50);
+  --color-destructive: var(--red-500);
+  --color-destructive-foreground: var(--zinc-50);
+  --color-border: var(--zinc-800);
+  --color-input: var(--zinc-800);
+  --color-ring: var(--sky-500);
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+}
+
+code, pre, .font-mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
