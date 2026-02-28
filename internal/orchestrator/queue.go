@@ -15,6 +15,8 @@ const (
 	StatusFailed           = "failed"
 )
 
+var approvedValue = "approved"
+
 // nextTask returns the oldest queued task (FIFO).
 // ListTasks returns DESC order, so we take the last element.
 func (o *Orchestrator) nextTask(ctx context.Context) (*store.Task, error) {

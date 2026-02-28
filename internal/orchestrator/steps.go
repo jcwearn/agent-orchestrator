@@ -106,6 +106,14 @@ func (o *Orchestrator) failTask(ctx context.Context, task *store.Task, workspace
 		o.logger.Error("update failed task", "task_id", task.ID, "error", err)
 	}
 	o.publishEvent(task.ID, "task.updated")
+
+	// For GitHub tasks, post failure comment.
+	if o.isGitHubTask(task) {
+		if err := o.config.Notifier.NotifyFailed(ctx, *task.GithubOwner, *task.GithubRepo, *task.GithubIssue, errMsg); err != nil {
+			o.logger.Error("notify failed", "task_id", task.ID, "error", err)
+		}
+	}
+
 	o.stopAndRelease(ctx, workspace)
 }
 

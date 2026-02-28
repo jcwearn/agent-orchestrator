@@ -5,14 +5,15 @@
 | Phase | Status | Updated | Notes |
 |-------|--------|---------|-------|
 | 1. Foundation (Go Module + SQLite Store) | Complete | 2026-02-27 | Merged PR #3 |
-| 2. Coder Workspace Executor | In Review | 2026-02-27 | PR open |
-| 3. Task Orchestrator | In Review | 2026-02-27 | PR open |
-| 4. HTTP API | In Review | 2026-02-27 | PR open |
-| 5. GitHub Integration | Not Started | — | — |
+| 2. Coder Workspace Executor | Complete | 2026-02-27 | Merged PR #4 |
+| 3. Task Orchestrator | Complete | 2026-02-27 | Merged PR #5 |
+| 4. HTTP API | Complete | 2026-02-28 | Merged to main |
+| 5. GitHub Integration | In Review | 2026-02-28 | PR open |
 | 6. Embedded Web UI (Vite + React) | Not Started | — | — |
 | 7. Build, CI/CD + Docker Publishing | Not Started | — | — |
 
 ## Handoff Notes
+- **2026-02-28**: Phase 5 implemented. `internal/github/` package adds: `Client` (GitHub App authentication via `ghinstallation.Transport`, token generation), `Notifier` (posts plans as issue comments with multi-part splitting, checks thumbs-up reactions/human feedback for approval, posts completion/failure comments, closes issues). `internal/orchestrator/` adds: `Notifier` interface on `Config`, `isGitHubTask()` helper, lifecycle integration — `runTask` calls `NotifyPlanReady` after planning, `processApprovedTasks` polls `CheckApproval` for unapproved GitHub tasks, `runImplement` calls `NotifyComplete`, `failTask` calls `NotifyFailed`. `internal/server/` adds: optional `githubClient`/`webhookSecret` fields via functional options, `POST /api/v1/webhooks/github` handler (HMAC-SHA256 validation, `IssuesEvent` labeled `ai-task` → creates task with GitHub metadata, posts acknowledgement comment). `cmd/main.go` reads `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET` env vars; conditionally creates client/notifier with adapter bridging `ApprovalResult` to flat returns. New dependencies: `github.com/google/go-github/v83`, `github.com/bradleyfalzon/ghinstallation/v2`. 18 github tests + 6 webhook tests + 6 orchestrator notifier tests pass. Pre-existing flaky `TestMultipleTasksQueueing` unchanged.
 - **2026-02-27**: Phase 4 implemented. `internal/server/` package adds: `Server` struct with chi router, task CRUD handlers (create/list/get/delete), approval + feedback endpoints, SSE log streaming (500ms poll with `ListTaskLogsSince`), agents endpoint (merges pool slots with Coder workspace status), WebSocket hub (register/unregister/broadcast), and `handleWebSocket` upgrade handler. Added `OnEvent` callback to orchestrator `Config` for bridging status transitions to the WebSocket hub. Added `ListTaskLogsSince` to store. Wired into `cmd/main.go` with hub creation and OnEvent callback. New dependency: `github.com/gorilla/websocket`. 26 server tests + 1 store test pass. Pre-existing flaky `TestMultipleTasksQueueing` exists on main (race condition in goroutine timing).
 - **2026-02-27**: Phase 3 implemented. `internal/orchestrator/` package adds: `Orchestrator` (tick loop with 5s interval), queue helpers (FIFO via ListTasks DESC), 2-step lifecycle (plan → awaiting_approval → implement → complete), `logWriter` (line-splitting log persistence), crash recovery (`recoverActiveTasks`), workspace release during approval wait. Wired into `cmd/main.go` with signal-notified context. 14 tests pass (mock executor, in-memory SQLite). No new dependencies.
 - **2026-02-27**: Phase 2 implemented. `internal/coder/` package adds: `Executor` (CLI wrapper for `coder ssh/start/stop/list`), `WorkspaceExecutor` interface for Phase 3, `Pool` (slot-based workspace assignment with `Acquire`/`Release`), sentinel errors, workspace status parsing. 17 tests pass (9 executor via `os/exec` test helper pattern, 7 pool including concurrency, 1 helper). No new dependencies added.

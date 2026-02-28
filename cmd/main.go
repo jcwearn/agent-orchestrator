@@ -9,12 +9,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
+	ghclient "github.com/jcwearn/agent-orchestrator/internal/github"
 	"github.com/jcwearn/agent-orchestrator/internal/orchestrator"
 	"github.com/jcwearn/agent-orchestrator/internal/server"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
@@ -60,6 +62,34 @@ func main() {
 
 	hub := server.NewHub()
 
+	// GitHub App integration (optional — disabled if env vars are unset).
+	var ghClient *ghclient.Client
+	var serverOpts []server.Option
+	appID := os.Getenv("GITHUB_APP_ID")
+	installationID := os.Getenv("GITHUB_APP_INSTALLATION_ID")
+	privateKey := os.Getenv("GITHUB_APP_PRIVATE_KEY")
+	webhookSecret := os.Getenv("GITHUB_WEBHOOK_SECRET")
+
+	if appID != "" && installationID != "" && privateKey != "" {
+		parsedAppID, err := strconv.ParseInt(appID, 10, 64)
+		if err != nil {
+			logger.Error("parse GITHUB_APP_ID", "error", err)
+			os.Exit(1)
+		}
+		parsedInstallationID, err := strconv.ParseInt(installationID, 10, 64)
+		if err != nil {
+			logger.Error("parse GITHUB_APP_INSTALLATION_ID", "error", err)
+			os.Exit(1)
+		}
+		ghClient, err = ghclient.NewClient(parsedAppID, parsedInstallationID, []byte(privateKey))
+		if err != nil {
+			logger.Error("create github client", "error", err)
+			os.Exit(1)
+		}
+		serverOpts = append(serverOpts, server.WithGitHub(ghClient, []byte(webhookSecret)))
+		logger.Info("github integration enabled", "app_id", parsedAppID, "installation_id", parsedInstallationID)
+	}
+
 	orchConfig := orchestrator.DefaultConfig()
 	orchConfig.OnEvent = func(taskID, eventType string) {
 		task, err := s.GetTask(ctx, taskID)
@@ -70,6 +100,12 @@ func main() {
 		hub.Broadcast(server.Event{Type: eventType, TaskID: taskID, Data: task})
 	}
 
+	// Wire notifier adapter if GitHub is configured.
+	if ghClient != nil {
+		notifier := ghclient.NewNotifier(ghClient, logger)
+		orchConfig.Notifier = &notifierAdapter{notifier: notifier}
+	}
+
 	orch := orchestrator.New(s, exec, pool, logger, orchConfig)
 	go func() {
 		if err := orch.Run(ctx); err != nil && err != context.Canceled {
@@ -77,7 +113,7 @@ func main() {
 		}
 	}()
 
-	srv := server.New(s, pool, exec, hub, logger)
+	srv := server.New(s, pool, exec, hub, logger, serverOpts...)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -130,4 +166,33 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// notifierAdapter bridges github.Notifier (which returns ApprovalResult) to the
+// orchestrator.Notifier interface (which uses flat return values).
+type notifierAdapter struct {
+	notifier *ghclient.Notifier
+}
+
+func (a *notifierAdapter) NotifyPlanReady(ctx context.Context, owner, repo string, issue int, plan string) (int64, error) {
+	return a.notifier.NotifyPlanReady(ctx, owner, repo, issue, plan)
+}
+
+func (a *notifierAdapter) CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (bool, string, error) {
+	result, err := a.notifier.CheckApproval(ctx, owner, repo, issue, commentID)
+	if err != nil {
+		return false, "", err
+	}
+	if result.Approved {
+		return true, "", nil
+	}
+	return false, result.Feedback, nil
+}
+
+func (a *notifierAdapter) NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error {
+	return a.notifier.NotifyComplete(ctx, owner, repo, issue, prURL)
+}
+
+func (a *notifierAdapter) NotifyFailed(ctx context.Context, owner, repo string, issue int, reason string) error {
+	return a.notifier.NotifyFailed(ctx, owner, repo, issue, reason)
 }

@@ -10,10 +10,20 @@ import (
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
+// Notifier is called at lifecycle transitions for GitHub-sourced tasks.
+// The github.Notifier satisfies this interface structurally.
+type Notifier interface {
+	NotifyPlanReady(ctx context.Context, owner, repo string, issue int, plan string) (commentID int64, err error)
+	CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (approved bool, feedback string, err error)
+	NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error
+	NotifyFailed(ctx context.Context, owner, repo string, issue int, reason string) error
+}
+
 // Config holds orchestrator settings.
 type Config struct {
 	TickInterval time.Duration
 	OnEvent      func(taskID, eventType string)
+	Notifier     Notifier
 }
 
 // DefaultConfig returns sensible defaults: 5-second tick interval.
@@ -104,6 +114,34 @@ func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
 
 	for i := range tasks {
 		t := &tasks[i]
+
+		// For unapproved GitHub tasks with a plan comment, poll GitHub for approval.
+		if !isApproved(t) && o.isGitHubTask(t) && t.PlanCommentID != nil {
+			approved, feedback, err := o.config.Notifier.CheckApproval(ctx, *t.GithubOwner, *t.GithubRepo, *t.GithubIssue, int64(*t.PlanCommentID))
+			if err != nil {
+				o.logger.Error("check approval", "task_id", t.ID, "error", err)
+				continue
+			}
+			if approved {
+				t.PlanFeedback = &approvedValue
+				if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
+					o.logger.Error("update task after github approval", "task_id", t.ID, "error", err)
+					continue
+				}
+				o.publishEvent(t.ID, "task.updated")
+			} else if feedback != "" {
+				t.PlanFeedback = &feedback
+				t.PlanRevision++
+				if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
+					o.logger.Error("update task with github feedback", "task_id", t.ID, "error", err)
+				}
+				o.publishEvent(t.ID, "task.updated")
+				continue
+			} else {
+				continue
+			}
+		}
+
 		if !isApproved(t) {
 			continue
 		}
@@ -123,6 +161,12 @@ func (o *Orchestrator) publishEvent(taskID, eventType string) {
 	if o.config.OnEvent != nil {
 		o.config.OnEvent(taskID, eventType)
 	}
+}
+
+// isGitHubTask returns true if the task originated from GitHub and a notifier is configured.
+func (o *Orchestrator) isGitHubTask(task *store.Task) bool {
+	return o.config.Notifier != nil && task.SourceType == "github" &&
+		task.GithubOwner != nil && task.GithubRepo != nil && task.GithubIssue != nil
 }
 
 // runTask drives a task through the planning step. On success, the task moves
@@ -150,6 +194,17 @@ func (o *Orchestrator) runTask(ctx context.Context, task *store.Task, workspace 
 	if err := o.stepPlan(ctx, task, workspace); err != nil {
 		o.failTask(ctx, task, workspace, err)
 		return
+	}
+
+	// For GitHub tasks, post plan as issue comment.
+	if o.isGitHubTask(task) && task.Plan != nil {
+		commentID, err := o.config.Notifier.NotifyPlanReady(ctx, *task.GithubOwner, *task.GithubRepo, *task.GithubIssue, *task.Plan)
+		if err != nil {
+			o.logger.Error("notify plan ready", "task_id", task.ID, "error", err)
+		} else {
+			cid := int(commentID)
+			task.PlanCommentID = &cid
+		}
 	}
 
 	task.Status = StatusAwaitingApproval
@@ -194,6 +249,18 @@ func (o *Orchestrator) runImplement(ctx context.Context, task *store.Task, works
 		o.logger.Error("update task to complete", "task_id", task.ID, "error", err)
 	}
 	o.publishEvent(task.ID, "task.updated")
+
+	// For GitHub tasks, post completion comment.
+	if o.isGitHubTask(task) {
+		prURL := ""
+		if task.PRUrl != nil {
+			prURL = *task.PRUrl
+		}
+		if err := o.config.Notifier.NotifyComplete(ctx, *task.GithubOwner, *task.GithubRepo, *task.GithubIssue, prURL); err != nil {
+			o.logger.Error("notify complete", "task_id", task.ID, "error", err)
+		}
+	}
+
 	o.stopAndRelease(ctx, workspace)
 	o.logger.Info("task complete", "task_id", task.ID)
 }
