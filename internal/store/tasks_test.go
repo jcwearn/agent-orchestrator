@@ -230,6 +230,60 @@ func TestListTaskLogs(t *testing.T) {
 	}
 }
 
+func TestListTaskLogsSince(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	task := &Task{Prompt: "task", RepoURL: "https://github.com/test/repo", SourceType: "manual", SessionID: "s1"}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	logs := []TaskLog{
+		{TaskID: task.ID, Step: "plan", Stream: "stdout", Line: "line 1"},
+		{TaskID: task.ID, Step: "plan", Stream: "stdout", Line: "line 2"},
+		{TaskID: task.ID, Step: "plan", Stream: "stdout", Line: "line 3"},
+	}
+	for i := range logs {
+		if err := s.CreateTaskLog(ctx, &logs[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Get logs after the first one
+	since, err := s.ListTaskLogsSince(ctx, task.ID, logs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(since) != 2 {
+		t.Fatalf("expected 2 logs, got %d", len(since))
+	}
+	if since[0].Line != "line 2" {
+		t.Fatalf("expected 'line 2', got %q", since[0].Line)
+	}
+	if since[1].Line != "line 3" {
+		t.Fatalf("expected 'line 3', got %q", since[1].Line)
+	}
+
+	// Get all logs (afterID=0)
+	all, err := s.ListTaskLogsSince(ctx, task.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 logs, got %d", len(all))
+	}
+
+	// Get none (afterID > last)
+	none, err := s.ListTaskLogsSince(ctx, task.ID, logs[2].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("expected 0 logs, got %d", len(none))
+	}
+}
+
 func TestDeleteTaskWithLogs(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

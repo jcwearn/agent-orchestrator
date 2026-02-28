@@ -105,6 +105,7 @@ func (o *Orchestrator) failTask(ctx context.Context, task *store.Task, workspace
 	if err := o.store.UpdateTask(ctx, task.ID, task); err != nil {
 		o.logger.Error("update failed task", "task_id", task.ID, "error", err)
 	}
+	o.publishEvent(task.ID, "task.updated")
 	o.stopAndRelease(ctx, workspace)
 }
 

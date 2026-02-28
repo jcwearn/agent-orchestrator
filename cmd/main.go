@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
 	"github.com/jcwearn/agent-orchestrator/internal/orchestrator"
+	"github.com/jcwearn/agent-orchestrator/internal/server"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
@@ -56,12 +57,27 @@ func main() {
 
 	exec := coder.NewExecutor(logger, nil)
 	pool := coder.NewPool(coder.DefaultWorkspaces)
-	orch := orchestrator.New(s, exec, pool, logger, orchestrator.DefaultConfig())
+
+	hub := server.NewHub()
+
+	orchConfig := orchestrator.DefaultConfig()
+	orchConfig.OnEvent = func(taskID, eventType string) {
+		task, err := s.GetTask(ctx, taskID)
+		if err != nil {
+			logger.Error("fetch task for event", "task_id", taskID, "error", err)
+			return
+		}
+		hub.Broadcast(server.Event{Type: eventType, TaskID: taskID, Data: task})
+	}
+
+	orch := orchestrator.New(s, exec, pool, logger, orchConfig)
 	go func() {
 		if err := orch.Run(ctx); err != nil && err != context.Canceled {
 			logger.Error("orchestrator error", "error", err)
 		}
 	}()
+
+	srv := server.New(s, pool, exec, hub, logger)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -80,14 +96,16 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	srv := &http.Server{
+	r.Mount("/", srv.Routes())
+
+	httpSrv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
 	}
 
 	go func() {
 		logger.Info("server starting", "port", port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server error", "error", err)
 			os.Exit(1)
 		}
@@ -99,7 +117,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("shutdown error", "error", err)
 		os.Exit(1)
 	}

@@ -171,6 +171,26 @@ func (s *Store) CreateTaskLog(ctx context.Context, tl *TaskLog) error {
 	return nil
 }
 
+func (s *Store) ListTaskLogsSince(ctx context.Context, taskID string, afterID int) ([]TaskLog, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT
+		id, task_id, step, stream, line, created_at
+	FROM task_logs WHERE task_id = ? AND id > ? ORDER BY id ASC`, taskID, afterID)
+	if err != nil {
+		return nil, fmt.Errorf("list task logs since: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []TaskLog
+	for rows.Next() {
+		tl, err := scanTaskLog(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan task log: %w", err)
+		}
+		logs = append(logs, *tl)
+	}
+	return logs, rows.Err()
+}
+
 func (s *Store) ListTaskLogs(ctx context.Context, taskID string, step string) ([]TaskLog, error) {
 	var rows *sql.Rows
 	var err error

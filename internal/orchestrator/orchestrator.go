@@ -13,6 +13,7 @@ import (
 // Config holds orchestrator settings.
 type Config struct {
 	TickInterval time.Duration
+	OnEvent      func(taskID, eventType string)
 }
 
 // DefaultConfig returns sensible defaults: 5-second tick interval.
@@ -118,6 +119,12 @@ func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
 	return nil
 }
 
+func (o *Orchestrator) publishEvent(taskID, eventType string) {
+	if o.config.OnEvent != nil {
+		o.config.OnEvent(taskID, eventType)
+	}
+}
+
 // runTask drives a task through the planning step. On success, the task moves
 // to awaiting_approval and the workspace is released.
 func (o *Orchestrator) runTask(ctx context.Context, task *store.Task, workspace string) {
@@ -133,6 +140,7 @@ func (o *Orchestrator) runTask(ctx context.Context, task *store.Task, workspace 
 		o.stopAndRelease(ctx, workspace)
 		return
 	}
+	o.publishEvent(task.ID, "task.updated")
 
 	if err := o.startWorkspace(ctx, task, workspace); err != nil {
 		o.failTask(ctx, task, workspace, err)
@@ -149,6 +157,7 @@ func (o *Orchestrator) runTask(ctx context.Context, task *store.Task, workspace 
 	if err := o.store.UpdateTask(ctx, task.ID, task); err != nil {
 		o.logger.Error("update task to awaiting_approval", "task_id", task.ID, "error", err)
 	}
+	o.publishEvent(task.ID, "task.updated")
 	o.stopAndRelease(ctx, workspace)
 	o.logger.Info("task plan complete, awaiting approval", "task_id", task.ID)
 }
@@ -166,6 +175,7 @@ func (o *Orchestrator) runImplement(ctx context.Context, task *store.Task, works
 		o.stopAndRelease(ctx, workspace)
 		return
 	}
+	o.publishEvent(task.ID, "task.updated")
 
 	if err := o.startWorkspace(ctx, task, workspace); err != nil {
 		o.failTask(ctx, task, workspace, err)
@@ -183,6 +193,7 @@ func (o *Orchestrator) runImplement(ctx context.Context, task *store.Task, works
 	if err := o.store.UpdateTask(ctx, task.ID, task); err != nil {
 		o.logger.Error("update task to complete", "task_id", task.ID, "error", err)
 	}
+	o.publishEvent(task.ID, "task.updated")
 	o.stopAndRelease(ctx, workspace)
 	o.logger.Info("task complete", "task_id", task.ID)
 }
