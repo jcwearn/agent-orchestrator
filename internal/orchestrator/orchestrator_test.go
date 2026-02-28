@@ -542,3 +542,252 @@ func TestMultipleTasksQueueing(t *testing.T) {
 		t.Fatalf("expected task-3 awaiting_approval, got %s", c3.Status)
 	}
 }
+
+// --- mock notifier ---
+
+type mockNotifier struct {
+	mu               sync.Mutex
+	planReadyCalls   []string
+	checkCalls       []string
+	completeCalls    []string
+	failedCalls      []string
+	planReadyResult  int64
+	checkApproved    bool
+	checkFeedback    string
+}
+
+func newMockNotifier() *mockNotifier {
+	return &mockNotifier{planReadyResult: 42}
+}
+
+func (m *mockNotifier) NotifyPlanReady(ctx context.Context, owner, repo string, issue int, plan string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.planReadyCalls = append(m.planReadyCalls, fmt.Sprintf("%s/%s#%d", owner, repo, issue))
+	return m.planReadyResult, nil
+}
+
+func (m *mockNotifier) CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (bool, string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.checkCalls = append(m.checkCalls, fmt.Sprintf("%s/%s#%d@%d", owner, repo, issue, commentID))
+	return m.checkApproved, m.checkFeedback, nil
+}
+
+func (m *mockNotifier) NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.completeCalls = append(m.completeCalls, fmt.Sprintf("%s/%s#%d", owner, repo, issue))
+	return nil
+}
+
+func (m *mockNotifier) NotifyFailed(ctx context.Context, owner, repo string, issue int, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failedCalls = append(m.failedCalls, fmt.Sprintf("%s/%s#%d: %s", owner, repo, issue, reason))
+	return nil
+}
+
+func intPtr(i int) *int { return &i }
+
+func createGitHubTask(t *testing.T, s *store.Store, prompt string) *store.Task {
+	t.Helper()
+	task := &store.Task{
+		Prompt:      prompt,
+		RepoURL:     "https://github.com/test/repo.git",
+		BaseBranch:  "main",
+		SourceType:  "github",
+		GithubOwner: strPtr("test"),
+		GithubRepo:  strPtr("repo"),
+		GithubIssue: intPtr(1),
+		SessionID:   "session-" + prompt,
+	}
+	if err := s.CreateTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	return task
+}
+
+func TestRunTask_GitHubNotifyPlanReady(t *testing.T) {
+	exec := newMockExecutor()
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		fmt.Fprint(stdout, "the plan")
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	notifier := newMockNotifier()
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "github plan")
+	ws, _ := o.pool.Acquire(task.ID)
+	o.runTask(ctx, task, ws)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusAwaitingApproval {
+		t.Fatalf("expected awaiting_approval, got %s", updated.Status)
+	}
+	if updated.PlanCommentID == nil || *updated.PlanCommentID != 42 {
+		t.Fatalf("expected plan_comment_id 42, got %v", updated.PlanCommentID)
+	}
+
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.planReadyCalls) != 1 {
+		t.Fatalf("expected 1 plan ready call, got %d", len(notifier.planReadyCalls))
+	}
+	if notifier.planReadyCalls[0] != "test/repo#1" {
+		t.Fatalf("unexpected call: %s", notifier.planReadyCalls[0])
+	}
+}
+
+func TestRunTask_NonGitHubSkipsNotifier(t *testing.T) {
+	exec := newMockExecutor()
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		fmt.Fprint(stdout, "the plan")
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	notifier := newMockNotifier()
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	// Non-GitHub task (source_type = "manual").
+	task := createTask(t, s, "manual plan")
+	ws, _ := o.pool.Acquire(task.ID)
+	o.runTask(ctx, task, ws)
+
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.planReadyCalls) != 0 {
+		t.Fatalf("expected 0 plan ready calls for non-github task, got %d", len(notifier.planReadyCalls))
+	}
+}
+
+func TestFailTask_GitHubNotifyFailed(t *testing.T) {
+	exec := newMockExecutor()
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		return nil, errors.New("ssh broken")
+	}
+
+	notifier := newMockNotifier()
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "github fail")
+	ws, _ := o.pool.Acquire(task.ID)
+	o.runTask(ctx, task, ws)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusFailed {
+		t.Fatalf("expected failed, got %s", updated.Status)
+	}
+
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.failedCalls) != 1 {
+		t.Fatalf("expected 1 failed call, got %d", len(notifier.failedCalls))
+	}
+}
+
+func TestProcessApprovedTasks_GitHubCheckApproval(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	notifier.checkApproved = true
+
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	// Create GitHub task in awaiting_approval with a plan comment ID.
+	task := createGitHubTask(t, s, "github approve")
+	task.Status = StatusAwaitingApproval
+	task.Plan = strPtr("the plan")
+	commentID := 42
+	task.PlanCommentID = &commentID
+	s.UpdateTask(ctx, task.ID, task)
+
+	if err := o.processApprovedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusComplete {
+		t.Fatalf("expected complete after github approval, got %s", updated.Status)
+	}
+	if updated.PlanFeedback == nil || *updated.PlanFeedback != "approved" {
+		t.Fatal("expected plan_feedback 'approved'")
+	}
+
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.checkCalls) != 1 {
+		t.Fatalf("expected 1 check call, got %d", len(notifier.checkCalls))
+	}
+}
+
+func TestProcessApprovedTasks_GitHubFeedback(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	notifier.checkFeedback = "please add tests"
+
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "github feedback")
+	task.Status = StatusAwaitingApproval
+	task.Plan = strPtr("the plan")
+	commentID := 42
+	task.PlanCommentID = &commentID
+	s.UpdateTask(ctx, task.ID, task)
+
+	if err := o.processApprovedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	// Task should remain awaiting_approval with feedback set.
+	if updated.Status != StatusAwaitingApproval {
+		t.Fatalf("expected awaiting_approval, got %s", updated.Status)
+	}
+	if updated.PlanFeedback == nil || *updated.PlanFeedback != "please add tests" {
+		t.Fatalf("expected feedback, got %v", updated.PlanFeedback)
+	}
+	if updated.PlanRevision != 1 {
+		t.Fatalf("expected plan_revision 1, got %d", updated.PlanRevision)
+	}
+}
+
+func TestRunImplement_GitHubNotifyComplete(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "github complete")
+	task.Status = StatusAwaitingApproval
+	task.Plan = strPtr("the plan")
+	task.PlanFeedback = strPtr("approved")
+	s.UpdateTask(ctx, task.ID, task)
+
+	ws, _ := o.pool.Acquire(task.ID)
+	o.runImplement(ctx, task, ws)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusComplete {
+		t.Fatalf("expected complete, got %s", updated.Status)
+	}
+
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.completeCalls) != 1 {
+		t.Fatalf("expected 1 complete call, got %d", len(notifier.completeCalls))
+	}
+}
