@@ -105,7 +105,9 @@ func (o *Orchestrator) tick(ctx context.Context) error {
 	task.Status = StatusPlanning
 	task.WorkspaceID = &workspace
 	if err := o.store.UpdateTask(ctx, task.ID, task); err != nil {
-		o.pool.Release(workspace)
+		if relErr := o.pool.Release(workspace); relErr != nil {
+			o.logger.Error("release workspace after update failure", "workspace", workspace, "error", relErr)
+		}
 		return fmt.Errorf("mark task planning: %w", err)
 	}
 	o.publishEvent(task.ID, "task.updated")
@@ -167,7 +169,9 @@ func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
 		t.Status = StatusImplementing
 		t.WorkspaceID = &workspace
 		if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
-			o.pool.Release(workspace)
+			if relErr := o.pool.Release(workspace); relErr != nil {
+				o.logger.Error("release workspace after update failure", "workspace", workspace, "error", relErr)
+			}
 			o.logger.Error("mark task implementing", "task_id", t.ID, "error", err)
 			continue
 		}
