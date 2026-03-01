@@ -94,7 +94,7 @@ func TestGitHubWebhook_IssuesLabeled_CreatesTask(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		postedComment = body.Body
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(gogithub.IssueComment{
+		_ = json.NewEncoder(w).Encode(gogithub.IssueComment{
 			ID:   gogithub.Ptr(int64(1)),
 			Body: gogithub.Ptr(body.Body),
 		})
@@ -263,7 +263,7 @@ func TestGitHubWebhook_IssuesLabeled_TitleOnly(t *testing.T) {
 	ghMux := http.NewServeMux()
 	ghMux.HandleFunc("POST /api/v3/repos/testowner/testrepo/issues/5/comments", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(gogithub.IssueComment{ID: gogithub.Ptr(int64(1))})
+		_ = json.NewEncoder(w).Encode(gogithub.IssueComment{ID: gogithub.Ptr(int64(1))})
 	})
 	ghServer := httptest.NewServer(ghMux)
 	defer ghServer.Close()
