@@ -100,6 +100,16 @@ func (o *Orchestrator) tick(ctx context.Context) error {
 		return nil // no free workspace, try next tick
 	}
 
+	// Mark as planning synchronously before launching the goroutine so the
+	// next tick does not pick up the same task while it is still "queued".
+	task.Status = StatusPlanning
+	task.WorkspaceID = &workspace
+	if err := o.store.UpdateTask(ctx, task.ID, task); err != nil {
+		o.pool.Release(workspace)
+		return fmt.Errorf("mark task planning: %w", err)
+	}
+	o.publishEvent(task.ID, "task.updated")
+
 	go o.runTask(ctx, task, workspace)
 	return nil
 }
@@ -152,6 +162,17 @@ func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
 			return nil // no free workspace; stop processing
 		}
 
+		// Mark as implementing synchronously before launching the goroutine
+		// so the next tick does not pick up the same approved task again.
+		t.Status = StatusImplementing
+		t.WorkspaceID = &workspace
+		if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
+			o.pool.Release(workspace)
+			o.logger.Error("mark task implementing", "task_id", t.ID, "error", err)
+			continue
+		}
+		o.publishEvent(t.ID, "task.updated")
+
 		go o.runImplement(ctx, t, workspace)
 	}
 	return nil
@@ -174,7 +195,7 @@ func (o *Orchestrator) isGitHubTask(task *store.Task) bool {
 func (o *Orchestrator) runTask(ctx context.Context, task *store.Task, workspace string) {
 	o.logger.Info("starting task", "task_id", task.ID, "workspace", workspace)
 
-	task.Status = StatusPlanning
+	// Status is already set to planning by tick(). Set remaining fields.
 	step := "plan"
 	task.CurrentStep = &step
 	now := time.Now().UTC()
@@ -222,7 +243,7 @@ func (o *Orchestrator) runTask(ctx context.Context, task *store.Task, workspace 
 func (o *Orchestrator) runImplement(ctx context.Context, task *store.Task, workspace string) {
 	o.logger.Info("starting implementation", "task_id", task.ID, "workspace", workspace)
 
-	task.Status = StatusImplementing
+	// Status is already set to implementing by processApprovedTasks(). Set remaining fields.
 	step := "implement"
 	task.CurrentStep = &step
 	if err := o.store.UpdateTask(ctx, task.ID, task); err != nil {

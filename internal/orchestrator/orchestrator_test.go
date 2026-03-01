@@ -200,6 +200,8 @@ func TestRunTask_PlanSuccess(t *testing.T) {
 	task := createTask(t, s, "plan me")
 
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, err := s.GetTask(ctx, task.ID)
@@ -229,6 +231,8 @@ func TestRunTask_PlanFailure(t *testing.T) {
 	task := createTask(t, s, "will fail")
 
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, _ := s.GetTask(ctx, task.ID)
@@ -254,6 +258,8 @@ func TestRunTask_WorkspaceStartFailure(t *testing.T) {
 	task := createTask(t, s, "start fail")
 
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, _ := s.GetTask(ctx, task.ID)
@@ -271,7 +277,7 @@ func TestRunImplement_Success(t *testing.T) {
 	ctx := context.Background()
 
 	task := createTask(t, s, "implement me")
-	task.Status = StatusAwaitingApproval
+	task.Status = StatusImplementing
 	task.Plan = strPtr("the plan")
 	task.PlanFeedback = strPtr("approved")
 	_ = s.UpdateTask(ctx, task.ID, task)
@@ -301,7 +307,7 @@ func TestRunImplement_Failure(t *testing.T) {
 	ctx := context.Background()
 
 	task := createTask(t, s, "implement fail")
-	task.Status = StatusAwaitingApproval
+	task.Status = StatusImplementing
 	task.Plan = strPtr("the plan")
 	task.PlanFeedback = strPtr("approved")
 	_ = s.UpdateTask(ctx, task.ID, task)
@@ -606,6 +612,8 @@ func TestRunTask_GitHubNotifyPlanReady(t *testing.T) {
 
 	task := createGitHubTask(t, s, "github plan")
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, _ := s.GetTask(ctx, task.ID)
@@ -641,6 +649,8 @@ func TestRunTask_NonGitHubSkipsNotifier(t *testing.T) {
 	// Non-GitHub task (source_type = "manual").
 	task := createTask(t, s, "manual plan")
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	notifier.mu.Lock()
@@ -663,6 +673,8 @@ func TestFailTask_GitHubNotifyFailed(t *testing.T) {
 
 	task := createGitHubTask(t, s, "github fail")
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, _ := s.GetTask(ctx, task.ID)
@@ -753,7 +765,7 @@ func TestRunImplement_GitHubNotifyComplete(t *testing.T) {
 	ctx := context.Background()
 
 	task := createGitHubTask(t, s, "github complete")
-	task.Status = StatusAwaitingApproval
+	task.Status = StatusImplementing
 	task.Plan = strPtr("the plan")
 	task.PlanFeedback = strPtr("approved")
 	_ = s.UpdateTask(ctx, task.ID, task)
