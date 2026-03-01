@@ -113,6 +113,26 @@ func createTask(t *testing.T, s *store.Store, prompt string) *store.Task {
 
 func strPtr(s string) *string { return &s }
 
+// waitForStatus polls the store until the task reaches the expected status or
+// the timeout expires. This replaces flaky time.Sleep calls in tests that launch
+// goroutines via tick().
+func waitForStatus(t *testing.T, s *store.Store, taskID, expected string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		task, err := s.GetTask(context.Background(), taskID)
+		if err != nil {
+			t.Fatalf("waitForStatus: get task: %v", err)
+		}
+		if task.Status == expected {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	task, _ := s.GetTask(context.Background(), taskID)
+	t.Fatalf("timed out waiting for task %s to reach %q, current status: %q", taskID, expected, task.Status)
+}
+
 // --- tests ---
 
 func TestTick_NoTasks(t *testing.T) {
@@ -141,16 +161,7 @@ func TestTick_PicksOldestTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait for goroutine to update DB.
-	time.Sleep(100 * time.Millisecond)
-
-	task, err := s.GetTask(ctx, t1.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if task.Status != StatusAwaitingApproval {
-		t.Fatalf("expected awaiting_approval, got %s", task.Status)
-	}
+	waitForStatus(t, s, t1.ID, StatusAwaitingApproval, 5*time.Second)
 }
 
 func TestTick_NoFreeWorkspace(t *testing.T) {
@@ -189,6 +200,8 @@ func TestRunTask_PlanSuccess(t *testing.T) {
 	task := createTask(t, s, "plan me")
 
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, err := s.GetTask(ctx, task.ID)
@@ -218,6 +231,8 @@ func TestRunTask_PlanFailure(t *testing.T) {
 	task := createTask(t, s, "will fail")
 
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, _ := s.GetTask(ctx, task.ID)
@@ -243,6 +258,8 @@ func TestRunTask_WorkspaceStartFailure(t *testing.T) {
 	task := createTask(t, s, "start fail")
 
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, _ := s.GetTask(ctx, task.ID)
@@ -260,7 +277,7 @@ func TestRunImplement_Success(t *testing.T) {
 	ctx := context.Background()
 
 	task := createTask(t, s, "implement me")
-	task.Status = StatusAwaitingApproval
+	task.Status = StatusImplementing
 	task.Plan = strPtr("the plan")
 	task.PlanFeedback = strPtr("approved")
 	_ = s.UpdateTask(ctx, task.ID, task)
@@ -290,7 +307,7 @@ func TestRunImplement_Failure(t *testing.T) {
 	ctx := context.Background()
 
 	task := createTask(t, s, "implement fail")
-	task.Status = StatusAwaitingApproval
+	task.Status = StatusImplementing
 	task.Plan = strPtr("the plan")
 	task.PlanFeedback = strPtr("approved")
 	_ = s.UpdateTask(ctx, task.ID, task)
@@ -325,13 +342,7 @@ func TestProcessApprovedTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait for goroutine.
-	time.Sleep(100 * time.Millisecond)
-
-	a, _ := s.GetTask(ctx, approved.ID)
-	if a.Status != StatusComplete {
-		t.Fatalf("expected approved task complete, got %s", a.Status)
-	}
+	waitForStatus(t, s, approved.ID, StatusComplete, 5*time.Second)
 
 	p, _ := s.GetTask(ctx, pending.ID)
 	if p.Status != StatusAwaitingApproval {
@@ -454,12 +465,9 @@ func TestFullLifecycle(t *testing.T) {
 	if err := o.tick(ctx); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	waitForStatus(t, s, task.ID, StatusAwaitingApproval, 5*time.Second)
 
 	updated, _ := s.GetTask(ctx, task.ID)
-	if updated.Status != StatusAwaitingApproval {
-		t.Fatalf("expected awaiting_approval, got %s", updated.Status)
-	}
 	if updated.Plan == nil || *updated.Plan != planOutput {
 		t.Fatal("plan not captured")
 	}
@@ -472,12 +480,7 @@ func TestFullLifecycle(t *testing.T) {
 	if err := o.tick(ctx); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
-
-	final, _ := s.GetTask(ctx, task.ID)
-	if final.Status != StatusComplete {
-		t.Fatalf("expected complete, got %s", final.Status)
-	}
+	waitForStatus(t, s, task.ID, StatusComplete, 5*time.Second)
 }
 
 func TestMultipleTasksQueueing(t *testing.T) {
@@ -519,28 +522,15 @@ func TestMultipleTasksQueueing(t *testing.T) {
 		t.Fatalf("expected task-3 queued, got %s", check.Status)
 	}
 
-	// Wait for first two to complete.
-	time.Sleep(500 * time.Millisecond)
-
-	c1, _ := s.GetTask(ctx, t1.ID)
-	c2, _ := s.GetTask(ctx, t2.ID)
-	if c1.Status != StatusAwaitingApproval {
-		t.Fatalf("expected task-1 awaiting_approval, got %s", c1.Status)
-	}
-	if c2.Status != StatusAwaitingApproval {
-		t.Fatalf("expected task-2 awaiting_approval, got %s", c2.Status)
-	}
+	// Wait for first two to finish planning.
+	waitForStatus(t, s, t1.ID, StatusAwaitingApproval, 5*time.Second)
+	waitForStatus(t, s, t2.ID, StatusAwaitingApproval, 5*time.Second)
 
 	// Now task-3 can be picked up.
 	if err := o.tick(ctx); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(500 * time.Millisecond)
-
-	c3, _ := s.GetTask(ctx, t3.ID)
-	if c3.Status != StatusAwaitingApproval {
-		t.Fatalf("expected task-3 awaiting_approval, got %s", c3.Status)
-	}
+	waitForStatus(t, s, t3.ID, StatusAwaitingApproval, 5*time.Second)
 }
 
 // --- mock notifier ---
@@ -622,6 +612,8 @@ func TestRunTask_GitHubNotifyPlanReady(t *testing.T) {
 
 	task := createGitHubTask(t, s, "github plan")
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, _ := s.GetTask(ctx, task.ID)
@@ -657,6 +649,8 @@ func TestRunTask_NonGitHubSkipsNotifier(t *testing.T) {
 	// Non-GitHub task (source_type = "manual").
 	task := createTask(t, s, "manual plan")
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	notifier.mu.Lock()
@@ -679,6 +673,8 @@ func TestFailTask_GitHubNotifyFailed(t *testing.T) {
 
 	task := createGitHubTask(t, s, "github fail")
 	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
 	o.runTask(ctx, task, ws)
 
 	updated, _ := s.GetTask(ctx, task.ID)
@@ -713,12 +709,9 @@ func TestProcessApprovedTasks_GitHubCheckApproval(t *testing.T) {
 	if err := o.processApprovedTasks(ctx); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	waitForStatus(t, s, task.ID, StatusComplete, 5*time.Second)
 
 	updated, _ := s.GetTask(ctx, task.ID)
-	if updated.Status != StatusComplete {
-		t.Fatalf("expected complete after github approval, got %s", updated.Status)
-	}
 	if updated.PlanFeedback == nil || *updated.PlanFeedback != "approved" {
 		t.Fatal("expected plan_feedback 'approved'")
 	}
@@ -772,7 +765,7 @@ func TestRunImplement_GitHubNotifyComplete(t *testing.T) {
 	ctx := context.Background()
 
 	task := createGitHubTask(t, s, "github complete")
-	task.Status = StatusAwaitingApproval
+	task.Status = StatusImplementing
 	task.Plan = strPtr("the plan")
 	task.PlanFeedback = strPtr("approved")
 	_ = s.UpdateTask(ctx, task.ID, task)
