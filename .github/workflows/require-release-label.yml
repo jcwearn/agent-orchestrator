@@ -1,0 +1,33 @@
+name: Require Release Label
+
+on:
+  pull_request:
+    types: [opened, labeled, unlabeled, synchronize]
+    branches: [main]
+
+jobs:
+  check-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for release label
+        env:
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          count=0
+          for label in "release:major" "release:minor" "release:patch"; do
+            if echo "$LABELS" | grep -q "\"$label\""; then
+              count=$((count + 1))
+            fi
+          done
+
+          if [ "$count" -eq 0 ]; then
+            echo "::error::PR must have exactly one release label: release:major, release:minor, or release:patch"
+            exit 1
+          fi
+
+          if [ "$count" -gt 1 ]; then
+            echo "::error::PR must have exactly one release label, but found $count"
+            exit 1
+          fi
+
+          echo "Release label check passed"

@@ -48,7 +48,7 @@ func testStore(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	s := store.New(db, slog.Default())
 	if err := s.RunMigrations(context.Background()); err != nil {
@@ -102,7 +102,7 @@ func TestCreateTask_Success(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
@@ -139,14 +139,14 @@ func TestCreateTask_CustomBaseBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 
 	var task store.Task
-	json.NewDecoder(resp.Body).Decode(&task)
+	_ = json.NewDecoder(resp.Body).Decode(&task)
 	if task.BaseBranch != "develop" {
 		t.Fatalf("expected base_branch 'develop', got %q", task.BaseBranch)
 	}
@@ -162,7 +162,7 @@ func TestCreateTask_MissingPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
@@ -179,7 +179,7 @@ func TestCreateTask_MissingRepoURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
@@ -195,14 +195,14 @@ func TestListTasks_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
 	var tasks []store.Task
-	json.NewDecoder(resp.Body).Decode(&tasks)
+	_ = json.NewDecoder(resp.Body).Decode(&tasks)
 	if len(tasks) != 0 {
 		t.Fatalf("expected empty list, got %d", len(tasks))
 	}
@@ -220,10 +220,10 @@ func TestListTasks_All(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var tasks []store.Task
-	json.NewDecoder(resp.Body).Decode(&tasks)
+	_ = json.NewDecoder(resp.Body).Decode(&tasks)
 	if len(tasks) != 2 {
 		t.Fatalf("expected 2 tasks, got %d", len(tasks))
 	}
@@ -237,16 +237,16 @@ func TestListTasks_Filtered(t *testing.T) {
 	createTask(t, s, "task-1")
 	task2 := createTask(t, s, "task-2")
 	task2.Status = "planning"
-	s.UpdateTask(context.Background(), task2.ID, task2)
+	_ = s.UpdateTask(context.Background(), task2.ID, task2)
 
 	resp, err := http.Get(ts.URL + "/api/v1/tasks?status=queued")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var tasks []store.Task
-	json.NewDecoder(resp.Body).Decode(&tasks)
+	_ = json.NewDecoder(resp.Body).Decode(&tasks)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 queued task, got %d", len(tasks))
 	}
@@ -263,14 +263,14 @@ func TestGetTask_Success(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
 	var got store.Task
-	json.NewDecoder(resp.Body).Decode(&got)
+	_ = json.NewDecoder(resp.Body).Decode(&got)
 	if got.Prompt != "get me" {
 		t.Fatalf("expected prompt 'get me', got %q", got.Prompt)
 	}
@@ -285,7 +285,7 @@ func TestGetTask_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
@@ -304,7 +304,7 @@ func TestDeleteTask_Success(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", resp.StatusCode)
@@ -321,7 +321,7 @@ func TestDeleteTask_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
@@ -339,20 +339,20 @@ func TestApproveTask_Success(t *testing.T) {
 	task.Status = "awaiting_approval"
 	plan := "the plan"
 	task.Plan = &plan
-	s.UpdateTask(context.Background(), task.ID, task)
+	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
 	var updated store.Task
-	json.NewDecoder(resp.Body).Decode(&updated)
+	_ = json.NewDecoder(resp.Body).Decode(&updated)
 	if updated.PlanFeedback == nil || *updated.PlanFeedback != "approved" {
 		t.Fatal("expected plan_feedback to be 'approved'")
 	}
@@ -369,7 +369,7 @@ func TestApproveTask_WrongStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", resp.StatusCode)
@@ -385,7 +385,7 @@ func TestApproveTask_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
@@ -403,21 +403,21 @@ func TestFeedbackTask_Success(t *testing.T) {
 	task.Status = "awaiting_approval"
 	plan := "the plan"
 	task.Plan = &plan
-	s.UpdateTask(context.Background(), task.ID, task)
+	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	body := `{"feedback": "please add error handling"}`
 	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
 	var updated store.Task
-	json.NewDecoder(resp.Body).Decode(&updated)
+	_ = json.NewDecoder(resp.Body).Decode(&updated)
 	if updated.PlanFeedback == nil || *updated.PlanFeedback != "please add error handling" {
 		t.Fatal("expected plan_feedback to be set")
 	}
@@ -433,14 +433,14 @@ func TestFeedbackTask_EmptyFeedback(t *testing.T) {
 
 	task := createTask(t, s, "feedback me")
 	task.Status = "awaiting_approval"
-	s.UpdateTask(context.Background(), task.ID, task)
+	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	body := `{"feedback": ""}`
 	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
@@ -459,7 +459,7 @@ func TestFeedbackTask_WrongStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", resp.StatusCode)
@@ -475,11 +475,11 @@ func TestStreamLogs(t *testing.T) {
 
 	task := createTask(t, s, "log task")
 	task.Status = "complete"
-	s.UpdateTask(context.Background(), task.ID, task)
+	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	// Add some logs.
 	for _, line := range []string{"line 1", "line 2"} {
-		s.CreateTaskLog(context.Background(), &store.TaskLog{
+		_ = s.CreateTaskLog(context.Background(), &store.TaskLog{
 			TaskID: task.ID, Step: "plan", Stream: "stdout", Line: line,
 		})
 	}
@@ -488,7 +488,7 @@ func TestStreamLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("expected text/event-stream, got %q", resp.Header.Get("Content-Type"))
@@ -520,7 +520,7 @@ func TestStreamLogs_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
@@ -534,10 +534,10 @@ func TestStreamLogs_ActiveTask(t *testing.T) {
 
 	task := createTask(t, s, "active task")
 	task.Status = "planning"
-	s.UpdateTask(context.Background(), task.ID, task)
+	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	// Add a log.
-	s.CreateTaskLog(context.Background(), &store.TaskLog{
+	_ = s.CreateTaskLog(context.Background(), &store.TaskLog{
 		TaskID: task.ID, Step: "plan", Stream: "stdout", Line: "line 1",
 	})
 
@@ -550,7 +550,7 @@ func TestStreamLogs_ActiveTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read partial output - should get some data lines.
 	buf := make([]byte, 4096)
@@ -563,7 +563,7 @@ func TestStreamLogs_ActiveTask(t *testing.T) {
 
 	// Mark task as complete so the SSE endpoint closes.
 	task.Status = "complete"
-	s.UpdateTask(context.Background(), task.ID, task)
+	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	// Read remaining output.
 	remaining, _ := io.ReadAll(resp.Body)
@@ -591,14 +591,14 @@ func TestListAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
 	var agents []AgentInfo
-	json.NewDecoder(resp.Body).Decode(&agents)
+	_ = json.NewDecoder(resp.Body).Decode(&agents)
 	if len(agents) != 2 {
 		t.Fatalf("expected 2 agents, got %d", len(agents))
 	}
@@ -628,14 +628,14 @@ func TestListAgents_ExecutorError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 (graceful degradation), got %d", resp.StatusCode)
 	}
 
 	var agents []AgentInfo
-	json.NewDecoder(resp.Body).Decode(&agents)
+	_ = json.NewDecoder(resp.Body).Decode(&agents)
 	// Should still return pool slots, just without workspace status.
 	if len(agents) != 2 {
 		t.Fatalf("expected 2 agents, got %d", len(agents))
@@ -664,7 +664,7 @@ func TestHub_RegisterBroadcastUnregister(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Give the server a moment to register.
 	time.Sleep(50 * time.Millisecond)
@@ -673,7 +673,7 @@ func TestHub_RegisterBroadcastUnregister(t *testing.T) {
 	hub.Broadcast(Event{Type: "task.created", TaskID: "test-123"})
 
 	// Read the message from client.
-	conn.SetReadDeadline(time.Now().Add(time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
@@ -713,7 +713,7 @@ func TestWebSocket_Handler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Give the server a moment to register the connection.
 	time.Sleep(50 * time.Millisecond)
@@ -722,14 +722,14 @@ func TestWebSocket_Handler(t *testing.T) {
 	srv.hub.Broadcast(Event{Type: "task.updated", TaskID: "ws-test"})
 
 	// Read message.
-	conn.SetReadDeadline(time.Now().Add(time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var event Event
-	json.Unmarshal(msg, &event)
+	_ = json.Unmarshal(msg, &event)
 	if event.Type != "task.updated" {
 		t.Fatalf("expected 'task.updated', got %q", event.Type)
 	}
@@ -746,7 +746,7 @@ func TestCreateTask_InvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)

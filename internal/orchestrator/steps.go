@@ -26,8 +26,8 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 	)
 
 	_, err := o.executor.SSH(ctx, workspace, cmd, stdout, stderr)
-	stdout.Flush()
-	stderr.Flush()
+	_ = stdout.Flush()
+	_ = stderr.Flush()
 
 	if err != nil {
 		return fmt.Errorf("plan step: %w", err)
@@ -54,8 +54,8 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 	)
 
 	_, err := o.executor.SSH(ctx, workspace, cmd, stdout, stderr)
-	stdout.Flush()
-	stderr.Flush()
+	_ = stdout.Flush()
+	_ = stderr.Flush()
 
 	if err != nil {
 		return fmt.Errorf("implement step: %w", err)
@@ -83,15 +83,6 @@ func (o *Orchestrator) stopAndRelease(ctx context.Context, workspace string) {
 	if err := o.pool.Release(workspace); err != nil {
 		o.logger.Error("release workspace", "workspace", workspace, "error", err)
 	}
-}
-
-// releaseWorkspace releases the workspace without stopping it. Used when we
-// want to free the slot (e.g., during approval wait) but may reuse the workspace later.
-func (o *Orchestrator) releaseWorkspace(ctx context.Context, task *store.Task, workspace string) {
-	if err := o.pool.Release(workspace); err != nil {
-		o.logger.Error("release workspace", "workspace", workspace, "error", err)
-	}
-	task.WorkspaceID = nil
 }
 
 // failTask marks the task as failed, records the error, and releases the workspace.

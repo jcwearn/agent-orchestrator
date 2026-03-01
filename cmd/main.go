@@ -48,7 +48,7 @@ func main() {
 	db.SetMaxOpenConns(1)
 
 	s := store.New(db, logger)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -126,11 +126,11 @@ func main() {
 		if err := s.Ping(r.Context()); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{"status": "error", "error": err.Error()})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "error": err.Error()})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
 	r.Mount("/", srv.Routes())
