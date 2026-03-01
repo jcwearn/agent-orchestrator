@@ -312,3 +312,118 @@ func TestGitHubWebhook_IssuesLabeled_TitleOnly(t *testing.T) {
 		t.Fatalf("expected prompt to be just title, got %q", tasks[0].Prompt)
 	}
 }
+
+func TestGitHubWebhook_IssuesOpened_WithAITaskLabel(t *testing.T) {
+	ghMux := http.NewServeMux()
+	ghMux.HandleFunc("POST /api/v3/repos/testowner/testrepo/issues/10/comments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gogithub.IssueComment{ID: gogithub.Ptr(int64(1))})
+	})
+	ghServer := httptest.NewServer(ghMux)
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHub(t, ghServer.URL)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	event := gogithub.IssuesEvent{
+		Action: gogithub.Ptr("opened"),
+		Issue: &gogithub.Issue{
+			Number: gogithub.Ptr(10),
+			Title:  gogithub.Ptr("Implement feature X"),
+			Body:   gogithub.Ptr("Details about feature X."),
+			Labels: []*gogithub.Label{
+				{Name: gogithub.Ptr("ai-task")},
+				{Name: gogithub.Ptr("enhancement")},
+			},
+		},
+		Repo: &gogithub.Repository{
+			Name:          gogithub.Ptr("testrepo"),
+			CloneURL:      gogithub.Ptr("https://github.com/testowner/testrepo.git"),
+			DefaultBranch: gogithub.Ptr("main"),
+			Owner:         &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload, _ := json.Marshal(event)
+	signature := signPayload(payload, testWebhookSecret)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	req.Header.Set("X-GitHub-Event", "issues")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	tasks, err := s.ListTasks(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+
+	task := tasks[0]
+	if task.SourceType != "github" {
+		t.Fatalf("expected source_type 'github', got %q", task.SourceType)
+	}
+	if task.GithubIssue == nil || *task.GithubIssue != 10 {
+		t.Fatalf("expected github_issue 10, got %v", task.GithubIssue)
+	}
+	if !strings.Contains(task.Prompt, "Implement feature X") {
+		t.Fatalf("expected prompt to contain title, got %q", task.Prompt)
+	}
+}
+
+func TestGitHubWebhook_IssuesOpened_WithoutAITaskLabel(t *testing.T) {
+	ghServer := httptest.NewServer(http.NewServeMux())
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHub(t, ghServer.URL)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	event := gogithub.IssuesEvent{
+		Action: gogithub.Ptr("opened"),
+		Issue: &gogithub.Issue{
+			Number: gogithub.Ptr(11),
+			Title:  gogithub.Ptr("Regular issue"),
+			Labels: []*gogithub.Label{
+				{Name: gogithub.Ptr("bug")},
+			},
+		},
+		Repo: &gogithub.Repository{
+			Name:  gogithub.Ptr("testrepo"),
+			Owner: &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload, _ := json.Marshal(event)
+	signature := signPayload(payload, testWebhookSecret)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	req.Header.Set("X-GitHub-Event", "issues")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	tasks, _ := s.ListTasks(context.Background(), "")
+	if len(tasks) != 0 {
+		t.Fatalf("expected 0 tasks, got %d", len(tasks))
+	}
+}

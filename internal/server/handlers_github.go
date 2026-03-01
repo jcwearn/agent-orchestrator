@@ -47,12 +47,16 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleIssuesEvent(r *http.Request, event *gogithub.IssuesEvent) error {
-	if event.GetAction() != "labeled" {
-		return nil
-	}
-
-	label := event.GetLabel()
-	if label == nil || label.GetName() != aiTaskLabel {
+	switch event.GetAction() {
+	case "labeled":
+		if event.GetLabel().GetName() != aiTaskLabel {
+			return nil
+		}
+	case "opened":
+		if !hasLabel(event.GetIssue(), aiTaskLabel) {
+			return nil
+		}
+	default:
 		return nil
 	}
 
@@ -106,4 +110,13 @@ func (s *Server) handleIssuesEvent(r *http.Request, event *gogithub.IssuesEvent)
 	}
 
 	return nil
+}
+
+func hasLabel(issue *gogithub.Issue, name string) bool {
+	for _, l := range issue.Labels {
+		if l.GetName() == name {
+			return true
+		}
+	}
+	return false
 }
