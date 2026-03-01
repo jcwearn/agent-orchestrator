@@ -20,6 +20,7 @@ import (
 	"github.com/jcwearn/agent-orchestrator/internal/orchestrator"
 	"github.com/jcwearn/agent-orchestrator/internal/server"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
+	"github.com/jcwearn/agent-orchestrator/web"
 )
 
 func main() {
@@ -133,6 +134,7 @@ func main() {
 	})
 
 	r.Mount("/", srv.Routes())
+	r.NotFound(server.SPAHandler(web.DistFS).ServeHTTP)
 
 	httpSrv := &http.Server{
 		Addr:    ":" + port,
