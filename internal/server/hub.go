@@ -34,7 +34,7 @@ func (h *Hub) Unregister(conn *websocket.Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.conns, conn)
-	conn.Close()
+	_ = conn.Close()
 }
 
 func (h *Hub) Broadcast(event Event) {
@@ -48,7 +48,7 @@ func (h *Hub) Broadcast(event Event) {
 
 	for conn := range h.conns {
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			delete(h.conns, conn)
 		}
 	}

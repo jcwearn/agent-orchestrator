@@ -48,7 +48,7 @@ func main() {
 	db.SetMaxOpenConns(1)
 
 	s := store.New(db, logger)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

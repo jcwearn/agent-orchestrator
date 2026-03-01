@@ -24,7 +24,7 @@ func SPAHandler(embedded fs.FS) http.Handler {
 		// Try to open the file. If it exists, serve it directly.
 		f, err := dist.Open(path)
 		if err == nil {
-			f.Close()
+			_ = f.Close()
 			fileServer.ServeHTTP(w, r)
 			return
 		}

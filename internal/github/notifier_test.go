@@ -179,7 +179,7 @@ func newFakeGitHub() (*httptest.Server, *fakeGitHub) {
 		var body struct {
 			Body string `json:"body"`
 		}
-		json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body)
 
 		fg.mu.Lock()
 		id := fg.nextID
@@ -192,13 +192,13 @@ func newFakeGitHub() (*httptest.Server, *fakeGitHub) {
 		fg.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(comment)
+		_ = json.NewEncoder(w).Encode(comment)
 	})
 
 	// List reactions on a comment
 	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]gogithub.Reaction{})
+		_ = json.NewEncoder(w).Encode([]gogithub.Reaction{})
 	})
 
 	// List comments on an issue
@@ -206,13 +206,13 @@ func newFakeGitHub() (*httptest.Server, *fakeGitHub) {
 		fg.mu.Lock()
 		defer fg.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(fg.comments)
+		_ = json.NewEncoder(w).Encode(fg.comments)
 	})
 
 	// Edit issue (for close)
 	mux.HandleFunc("PATCH /api/v3/repos/{owner}/{repo}/issues/{issue}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(gogithub.Issue{})
+		_ = json.NewEncoder(w).Encode(gogithub.Issue{})
 	})
 
 	ts := httptest.NewServer(mux)

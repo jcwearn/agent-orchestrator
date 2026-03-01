@@ -41,7 +41,7 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 	// If task is already terminal, send all logs and done immediately.
 	if isTerminal(task.Status) {
 		s.flushLogs(r.Context(), w, flusher, id, &lastID)
-		fmt.Fprintf(w, "event: done\ndata: {}\n\n")
+		_, _ = fmt.Fprintf(w, "event: done\ndata: {}\n\n")
 		flusher.Flush()
 		return
 	}
@@ -62,7 +62,7 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 			}
 			if isTerminal(task.Status) {
 				s.flushLogs(r.Context(), w, flusher, id, &lastID)
-				fmt.Fprintf(w, "event: done\ndata: {}\n\n")
+				_, _ = fmt.Fprintf(w, "event: done\ndata: {}\n\n")
 				flusher.Flush()
 				return
 			}
@@ -79,7 +79,7 @@ func (s *Server) flushLogs(ctx context.Context, w http.ResponseWriter, flusher h
 
 	for _, l := range logs {
 		data, _ := json.Marshal(l)
-		fmt.Fprintf(w, "data: %s\n\n", data)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 		*lastID = l.ID
 	}
 	if len(logs) > 0 {

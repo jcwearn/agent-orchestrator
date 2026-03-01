@@ -107,7 +107,7 @@ func TestPool_FreeCount(t *testing.T) {
 		t.Fatalf("expected 3 free, got %d", got)
 	}
 
-	p.Release(ws)
+	_ = p.Release(ws)
 	if got := p.FreeCount(); got != 4 {
 		t.Fatalf("expected 4 free after release, got %d", got)
 	}

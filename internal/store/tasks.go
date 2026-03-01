@@ -88,7 +88,7 @@ func (s *Store) ListTasks(ctx context.Context, status string) ([]Task, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []Task
 	for rows.Next() {
@@ -178,7 +178,7 @@ func (s *Store) ListTaskLogsSince(ctx context.Context, taskID string, afterID in
 	if err != nil {
 		return nil, fmt.Errorf("list task logs since: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var logs []TaskLog
 	for rows.Next() {
@@ -207,7 +207,7 @@ func (s *Store) ListTaskLogs(ctx context.Context, taskID string, step string) ([
 	if err != nil {
 		return nil, fmt.Errorf("list task logs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var logs []TaskLog
 	for rows.Next() {

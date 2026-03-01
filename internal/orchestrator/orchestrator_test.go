@@ -35,7 +35,7 @@ type sshCall struct {
 func newMockExecutor() *mockExecutor {
 	return &mockExecutor{
 		sshFunc: func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-			fmt.Fprint(stdout, "mock plan output")
+			_, _ = fmt.Fprint(stdout, "mock plan output")
 			return &coder.SSHResult{ExitCode: 0}, nil
 		},
 		startFunc: func(ctx context.Context, workspace string, params map[string]string) error { return nil },
@@ -77,7 +77,7 @@ func testStore(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	s := store.New(db, slog.Default())
 	if err := s.RunMigrations(context.Background()); err != nil {
@@ -180,7 +180,7 @@ func TestTick_NoFreeWorkspace(t *testing.T) {
 func TestRunTask_PlanSuccess(t *testing.T) {
 	exec := newMockExecutor()
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-		fmt.Fprint(stdout, "the generated plan")
+		_, _ = fmt.Fprint(stdout, "the generated plan")
 		return &coder.SSHResult{ExitCode: 0}, nil
 	}
 
@@ -263,7 +263,7 @@ func TestRunImplement_Success(t *testing.T) {
 	task.Status = StatusAwaitingApproval
 	task.Plan = strPtr("the plan")
 	task.PlanFeedback = strPtr("approved")
-	s.UpdateTask(ctx, task.ID, task)
+	_ = s.UpdateTask(ctx, task.ID, task)
 
 	ws, _ := o.pool.Acquire(task.ID)
 	o.runImplement(ctx, task, ws)
@@ -293,7 +293,7 @@ func TestRunImplement_Failure(t *testing.T) {
 	task.Status = StatusAwaitingApproval
 	task.Plan = strPtr("the plan")
 	task.PlanFeedback = strPtr("approved")
-	s.UpdateTask(ctx, task.ID, task)
+	_ = s.UpdateTask(ctx, task.ID, task)
 
 	ws, _ := o.pool.Acquire(task.ID)
 	o.runImplement(ctx, task, ws)
@@ -314,12 +314,12 @@ func TestProcessApprovedTasks(t *testing.T) {
 	approved.Status = StatusAwaitingApproval
 	approved.Plan = strPtr("plan")
 	approved.PlanFeedback = strPtr("approved")
-	s.UpdateTask(ctx, approved.ID, approved)
+	_ = s.UpdateTask(ctx, approved.ID, approved)
 
 	pending := createTask(t, s, "pending review")
 	pending.Status = StatusAwaitingApproval
 	pending.Plan = strPtr("plan")
-	s.UpdateTask(ctx, pending.ID, pending)
+	_ = s.UpdateTask(ctx, pending.ID, pending)
 
 	if err := o.processApprovedTasks(ctx); err != nil {
 		t.Fatal(err)
@@ -347,11 +347,11 @@ func TestRecoverActiveTasks(t *testing.T) {
 	// Create tasks in active states.
 	planning := createTask(t, s, "planning")
 	planning.Status = StatusPlanning
-	s.UpdateTask(ctx, planning.ID, planning)
+	_ = s.UpdateTask(ctx, planning.ID, planning)
 
 	implementing := createTask(t, s, "implementing")
 	implementing.Status = StatusImplementing
-	s.UpdateTask(ctx, implementing.ID, implementing)
+	_ = s.UpdateTask(ctx, implementing.ID, implementing)
 
 	// Also a queued task that should NOT be affected.
 	queued := createTask(t, s, "queued")
@@ -406,9 +406,9 @@ func TestLogWriter(t *testing.T) {
 	task := createTask(t, s, "log test")
 
 	w := o.newLogWriter(ctx, task.ID, "plan", "stdout")
-	w.Write([]byte("line one\nline two\n"))
-	w.Write([]byte("partial"))
-	w.Flush()
+	_, _ = w.Write([]byte("line one\nline two\n"))
+	_, _ = w.Write([]byte("partial"))
+	_ = w.Flush()
 
 	if w.String() != "line one\nline two\npartial" {
 		t.Fatalf("unexpected accumulated output: %q", w.String())
@@ -439,7 +439,7 @@ func TestFullLifecycle(t *testing.T) {
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
 		callCount++
 		if callCount == 1 {
-			fmt.Fprint(stdout, planOutput)
+			_, _ = fmt.Fprint(stdout, planOutput)
 		}
 		return &coder.SSHResult{ExitCode: 0}, nil
 	}
@@ -466,7 +466,7 @@ func TestFullLifecycle(t *testing.T) {
 
 	// 3. Approve the task.
 	updated.PlanFeedback = strPtr("approved")
-	s.UpdateTask(ctx, updated.ID, updated)
+	_ = s.UpdateTask(ctx, updated.ID, updated)
 
 	// 4. Tick picks up the approved task and runs implementation.
 	if err := o.tick(ctx); err != nil {
@@ -485,7 +485,7 @@ func TestMultipleTasksQueueing(t *testing.T) {
 	// Make SSH slow enough that both goroutines are still running when we check.
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
 		time.Sleep(200 * time.Millisecond)
-		fmt.Fprint(stdout, "plan")
+		_, _ = fmt.Fprint(stdout, "plan")
 		return &coder.SSHResult{ExitCode: 0}, nil
 	}
 
@@ -611,7 +611,7 @@ func createGitHubTask(t *testing.T, s *store.Store, prompt string) *store.Task {
 func TestRunTask_GitHubNotifyPlanReady(t *testing.T) {
 	exec := newMockExecutor()
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-		fmt.Fprint(stdout, "the plan")
+		_, _ = fmt.Fprint(stdout, "the plan")
 		return &coder.SSHResult{ExitCode: 0}, nil
 	}
 
@@ -645,7 +645,7 @@ func TestRunTask_GitHubNotifyPlanReady(t *testing.T) {
 func TestRunTask_NonGitHubSkipsNotifier(t *testing.T) {
 	exec := newMockExecutor()
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-		fmt.Fprint(stdout, "the plan")
+		_, _ = fmt.Fprint(stdout, "the plan")
 		return &coder.SSHResult{ExitCode: 0}, nil
 	}
 
@@ -708,7 +708,7 @@ func TestProcessApprovedTasks_GitHubCheckApproval(t *testing.T) {
 	task.Plan = strPtr("the plan")
 	commentID := 42
 	task.PlanCommentID = &commentID
-	s.UpdateTask(ctx, task.ID, task)
+	_ = s.UpdateTask(ctx, task.ID, task)
 
 	if err := o.processApprovedTasks(ctx); err != nil {
 		t.Fatal(err)
@@ -744,7 +744,7 @@ func TestProcessApprovedTasks_GitHubFeedback(t *testing.T) {
 	task.Plan = strPtr("the plan")
 	commentID := 42
 	task.PlanCommentID = &commentID
-	s.UpdateTask(ctx, task.ID, task)
+	_ = s.UpdateTask(ctx, task.ID, task)
 
 	if err := o.processApprovedTasks(ctx); err != nil {
 		t.Fatal(err)
@@ -775,7 +775,7 @@ func TestRunImplement_GitHubNotifyComplete(t *testing.T) {
 	task.Status = StatusAwaitingApproval
 	task.Plan = strPtr("the plan")
 	task.PlanFeedback = strPtr("approved")
-	s.UpdateTask(ctx, task.ID, task)
+	_ = s.UpdateTask(ctx, task.ID, task)
 
 	ws, _ := o.pool.Acquire(task.ID)
 	o.runImplement(ctx, task, ws)

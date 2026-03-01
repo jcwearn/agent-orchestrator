@@ -14,7 +14,7 @@ func testStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	s := New(db, slog.Default())
 	if err := s.RunMigrations(context.Background()); err != nil {
@@ -53,7 +53,7 @@ func TestPing(t *testing.T) {
 		t.Fatal("ping should succeed:", err)
 	}
 
-	s.db.Close()
+	_ = s.db.Close()
 	if err := s.Ping(context.Background()); err == nil {
 		t.Fatal("ping should fail on closed db")
 	}

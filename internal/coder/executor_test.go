@@ -33,10 +33,10 @@ func TestHelperProcess(t *testing.T) {
 	}
 
 	if s := os.Getenv("FAKE_STDOUT"); s != "" {
-		fmt.Fprint(os.Stdout, s)
+		_, _ = fmt.Fprint(os.Stdout, s)
 	}
 	if s := os.Getenv("FAKE_STDERR"); s != "" {
-		fmt.Fprint(os.Stderr, s)
+		_, _ = fmt.Fprint(os.Stderr, s)
 	}
 
 	code := 0
