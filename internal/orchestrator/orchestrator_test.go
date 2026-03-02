@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -218,6 +219,15 @@ func TestRunTask_PlanSuccess(t *testing.T) {
 	if o.pool.FreeCount() != len(coder.DefaultWorkspaces) {
 		t.Fatal("workspace not released")
 	}
+	// SSH command should contain --permission-mode plan.
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if len(exec.sshCalls) == 0 {
+		t.Fatal("expected at least one SSH call")
+	}
+	if !strings.Contains(exec.sshCalls[0].Command, "--permission-mode plan") {
+		t.Fatalf("expected --permission-mode plan in command, got: %s", exec.sshCalls[0].Command)
+	}
 }
 
 func TestRunTask_PlanFailure(t *testing.T) {
@@ -295,11 +305,21 @@ func TestRunImplement_Success(t *testing.T) {
 	if o.pool.FreeCount() != len(coder.DefaultWorkspaces) {
 		t.Fatal("workspace not released")
 	}
+	// Implement command should NOT contain --permission-mode plan.
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if len(exec.sshCalls) == 0 {
+		t.Fatal("expected at least one SSH call")
+	}
+	if strings.Contains(exec.sshCalls[0].Command, "--permission-mode plan") {
+		t.Fatalf("implement command should not contain --permission-mode plan, got: %s", exec.sshCalls[0].Command)
+	}
 }
 
 func TestRunImplement_Failure(t *testing.T) {
 	exec := newMockExecutor()
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		_, _ = fmt.Fprint(stderr, "Error: authentication failed\nfatal: could not push")
 		return nil, errors.New("implement failed")
 	}
 
@@ -318,6 +338,13 @@ func TestRunImplement_Failure(t *testing.T) {
 	updated, _ := s.GetTask(ctx, task.ID)
 	if updated.Status != StatusFailed {
 		t.Fatalf("expected failed, got %s", updated.Status)
+	}
+	// Error message should contain stderr content.
+	if updated.ErrorMessage == nil {
+		t.Fatal("expected error message")
+	}
+	if !strings.Contains(*updated.ErrorMessage, "authentication failed") {
+		t.Fatalf("expected stderr content in error message, got: %s", *updated.ErrorMessage)
 	}
 }
 
@@ -782,5 +809,49 @@ func TestRunImplement_GitHubNotifyComplete(t *testing.T) {
 	defer notifier.mu.Unlock()
 	if len(notifier.completeCalls) != 1 {
 		t.Fatalf("expected 1 complete call, got %d", len(notifier.completeCalls))
+	}
+}
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"no escapes", "hello world", "hello world"},
+		{"CSI color", "\x1b[31mred\x1b[0m", "red"},
+		{"CSI cursor", "\x1b[?1004l\x1b[?2004l\x1b[?25h", ""},
+		{"OSC sequence", "\x1b]9;4;0;\x07done", "done"},
+		{"mixed", "\x1b[32mok\x1b[0m plain \x1b]0;title\x07 end", "ok plain  end"},
+		{"multiline with escapes", "\x1b[1mline1\x1b[0m\nline2\n\x1b[33mline3\x1b[0m", "line1\nline2\nline3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripANSI(tt.input)
+			if got != tt.want {
+				t.Errorf("stripANSI(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLogWriter_Tail(t *testing.T) {
+	exec := newMockExecutor()
+	o, s := testOrchestrator(t, exec, nil)
+	ctx := context.Background()
+	task := createTask(t, s, "tail test")
+
+	w := o.newLogWriter(ctx, task.ID, "plan", "stderr")
+	_, _ = w.Write([]byte("line1\nline2\nline3\nline4\nline5"))
+
+	got := w.Tail(3)
+	if got != "line3\nline4\nline5" {
+		t.Fatalf("Tail(3) = %q, want %q", got, "line3\nline4\nline5")
+	}
+
+	all := w.Tail(100)
+	if all != "line1\nline2\nline3\nline4\nline5" {
+		t.Fatalf("Tail(100) = %q, want all lines", all)
 	}
 }
