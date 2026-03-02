@@ -10,7 +10,7 @@ import (
 )
 
 // ansiRe matches ANSI escape sequences: CSI sequences, OSC sequences, and simple escapes.
-var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Za-z]|\x1b\[[\?]?[0-9;]*[a-zA-Z]`)
+var ansiRe = regexp.MustCompile(`\x1b\[[\x20-\x3f]*[\x40-\x7e]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Za-z]`)
 
 func stripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
