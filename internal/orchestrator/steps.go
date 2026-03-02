@@ -133,8 +133,8 @@ func (o *Orchestrator) recoverActiveTasks(ctx context.Context) error {
 
 func buildPlanPrompt(task *store.Task) string {
 	return fmt.Sprintf(
-		"You are a coding agent operating in plan-only mode. Your goal is to explore the codebase "+
-			"and produce an implementation plan for the task below.\n\n"+
+		"You are a coding agent operating in plan-only mode. You are working in the %s repository. "+
+			"Your goal is to explore the codebase and produce an implementation plan for the task below.\n\n"+
 			"BEFORE writing the plan, use your tools to thoroughly explore the repository:\n"+
 			"- Use Glob to find relevant files and understand the project structure\n"+
 			"- Use Grep to search for related code, patterns, and existing conventions\n"+
@@ -153,6 +153,7 @@ func buildPlanPrompt(task *store.Task) string {
 			"Reference specific files and code you found during exploration. "+
 			"Do not implement anything -- only plan.\n\n"+
 			"Task: %s",
+		repoName(task.RepoURL),
 		task.Prompt,
 	)
 }

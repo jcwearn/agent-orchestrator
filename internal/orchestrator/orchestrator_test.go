@@ -815,6 +815,38 @@ func TestRunImplement_GitHubNotifyComplete(t *testing.T) {
 	}
 }
 
+func TestBuildPlanPrompt_IncludesRepoName(t *testing.T) {
+	task := &store.Task{
+		Prompt:  "Add a README",
+		RepoURL: "https://github.com/jcwearn/agent-orchestrator",
+	}
+	prompt := buildPlanPrompt(task)
+
+	if !strings.Contains(prompt, "agent-orchestrator") {
+		t.Fatalf("expected plan prompt to contain repo name, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Add a README") {
+		t.Fatalf("expected plan prompt to contain task prompt, got: %s", prompt)
+	}
+}
+
+func TestRepoName(t *testing.T) {
+	tests := []struct {
+		url  string
+		want string
+	}{
+		{"https://github.com/user/repo.git", "repo"},
+		{"https://github.com/user/repo", "repo"},
+		{"https://github.com/jcwearn/agent-orchestrator", "agent-orchestrator"},
+	}
+	for _, tt := range tests {
+		got := repoName(tt.url)
+		if got != tt.want {
+			t.Errorf("repoName(%q) = %q, want %q", tt.url, got, tt.want)
+		}
+	}
+}
+
 func TestStripANSI(t *testing.T) {
 	tests := []struct {
 		name  string
