@@ -3,10 +3,18 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"strings"
 
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
+
+// ansiRe matches ANSI escape sequences: CSI sequences, OSC sequences, and simple escapes.
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Za-z]|\x1b\[[\?]?[0-9;]*[a-zA-Z]`)
+
+func stripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
+}
 
 // logWriter splits written bytes into lines and persists each line as a TaskLog.
 // It also accumulates all output for later retrieval via String().
@@ -70,7 +78,17 @@ func (w *logWriter) Flush() error {
 	})
 }
 
-// String returns all accumulated output.
+// String returns all accumulated output with ANSI escape sequences stripped.
 func (w *logWriter) String() string {
-	return w.full.String()
+	return stripANSI(w.full.String())
+}
+
+// Tail returns the last n lines of accumulated output (ANSI-stripped).
+func (w *logWriter) Tail(n int) string {
+	s := stripANSI(w.full.String())
+	lines := strings.Split(s, "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }

@@ -18,7 +18,7 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 
 	repoDir := "/home/coder/" + repoName(task.RepoURL)
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s && claude --session-id %s -p %s --print",
+		"cd %s && git checkout %s && claude --session-id %s --permission-mode plan -p %s --print",
 		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
 		shellQuote(task.SessionID),
@@ -30,7 +30,7 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 	_ = stderr.Flush()
 
 	if err != nil {
-		return fmt.Errorf("plan step: %w", err)
+		return fmt.Errorf("plan step: %w\n\nstderr tail:\n%s", err, stderr.Tail(20))
 	}
 
 	plan := stdout.String()
@@ -58,7 +58,7 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 	_ = stderr.Flush()
 
 	if err != nil {
-		return fmt.Errorf("implement step: %w", err)
+		return fmt.Errorf("implement step: %w\n\nstderr tail:\n%s", err, stderr.Tail(20))
 	}
 	return nil
 }
