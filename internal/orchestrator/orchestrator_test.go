@@ -228,6 +228,9 @@ func TestRunTask_PlanSuccess(t *testing.T) {
 	if !strings.Contains(exec.sshCalls[0].Command, "--permission-mode plan") {
 		t.Fatalf("expected --permission-mode plan in command, got: %s", exec.sshCalls[0].Command)
 	}
+	if !strings.Contains(exec.sshCalls[0].Command, "> /dev/null 2>&1") {
+		t.Fatalf("expected git checkout redirected to /dev/null, got: %s", exec.sshCalls[0].Command)
+	}
 }
 
 func TestRunTask_PlanFailure(t *testing.T) {
@@ -825,6 +828,7 @@ func TestStripANSI(t *testing.T) {
 		{"OSC sequence", "\x1b]9;4;0;\x07done", "done"},
 		{"mixed", "\x1b[32mok\x1b[0m plain \x1b]0;title\x07 end", "ok plain  end"},
 		{"multiline with escapes", "\x1b[1mline1\x1b[0m\nline2\n\x1b[33mline3\x1b[0m", "line1\nline2\nline3"},
+		{"CSI private param", "\x1b[<u", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

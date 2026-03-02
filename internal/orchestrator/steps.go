@@ -18,7 +18,7 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 
 	repoDir := "/home/coder/" + repoName(task.RepoURL)
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s && claude --session-id %s --permission-mode plan -p %s --print",
+		"cd %s && git checkout %s > /dev/null 2>&1 && claude --session-id %s --permission-mode plan -p %s --print",
 		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
 		shellQuote(task.SessionID),
@@ -46,7 +46,7 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 
 	repoDir := "/home/coder/" + repoName(task.RepoURL)
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s && claude --resume %s -p %s --print",
+		"cd %s && git checkout %s > /dev/null 2>&1 && claude --resume %s -p %s --print",
 		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
 		shellQuote(task.SessionID),
