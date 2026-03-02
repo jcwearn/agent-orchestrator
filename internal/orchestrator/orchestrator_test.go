@@ -231,6 +231,9 @@ func TestRunTask_PlanSuccess(t *testing.T) {
 	if !strings.Contains(exec.sshCalls[0].Command, "> /dev/null 2>&1") {
 		t.Fatalf("expected git checkout redirected to /dev/null, got: %s", exec.sshCalls[0].Command)
 	}
+	if !strings.Contains(exec.sshCalls[0].Command, "TERM=dumb claude") {
+		t.Fatalf("expected TERM=dumb before claude command, got: %s", exec.sshCalls[0].Command)
+	}
 }
 
 func TestRunTask_PlanFailure(t *testing.T) {
@@ -869,6 +872,33 @@ func TestStripANSI(t *testing.T) {
 				t.Errorf("stripANSI(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStepPlan_EmptyOutput(t *testing.T) {
+	exec := newMockExecutor()
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		// Simulate PTY junk: SSH succeeds but stdout is empty/whitespace.
+		_, _ = fmt.Fprint(stdout, "   \n\n  ")
+		_, _ = fmt.Fprint(stderr, "some debug output")
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	o, s := testOrchestrator(t, exec, nil)
+	ctx := context.Background()
+	task := createTask(t, s, "empty plan")
+
+	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
+	o.runTask(ctx, task, ws)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusFailed {
+		t.Fatalf("expected failed for empty plan, got %s", updated.Status)
+	}
+	if updated.ErrorMessage == nil || !strings.Contains(*updated.ErrorMessage, "empty output") {
+		t.Fatalf("expected error about empty output, got: %v", updated.ErrorMessage)
 	}
 }
 

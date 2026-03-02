@@ -18,7 +18,7 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 
 	repoDir := "/home/coder/" + repoName(task.RepoURL)
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s > /dev/null 2>&1 && claude --session-id %s --permission-mode plan -p %s --print",
+		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude --session-id %s --permission-mode plan -p %s --print",
 		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
 		shellQuote(task.SessionID),
@@ -29,11 +29,19 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 	_ = stdout.Flush()
 	_ = stderr.Flush()
 
+	o.logger.Info("plan step SSH completed",
+		"task_id", task.ID,
+		"stdout_len", len(stdout.String()),
+		"stderr_len", len(stderr.String()))
+
 	if err != nil {
 		return fmt.Errorf("plan step: %w\n\nstderr tail:\n%s", err, stderr.Tail(20))
 	}
 
 	plan := stdout.String()
+	if strings.TrimSpace(plan) == "" {
+		return fmt.Errorf("plan step produced empty output\n\nstderr tail:\n%s\n\nstdout tail:\n%s", stderr.Tail(20), stdout.Tail(20))
+	}
 	task.Plan = &plan
 	return nil
 }
@@ -46,7 +54,7 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 
 	repoDir := "/home/coder/" + repoName(task.RepoURL)
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s > /dev/null 2>&1 && claude --resume %s -p %s --print",
+		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude --resume %s -p %s --print",
 		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
 		shellQuote(task.SessionID),
