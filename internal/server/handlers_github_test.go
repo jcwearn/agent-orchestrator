@@ -382,6 +382,103 @@ func TestGitHubWebhook_IssuesOpened_WithAITaskLabel(t *testing.T) {
 	}
 }
 
+func TestGitHubWebhook_DuplicateIssueEvent_Deduplicated(t *testing.T) {
+	commentCount := 0
+	ghMux := http.NewServeMux()
+	ghMux.HandleFunc("POST /api/v3/repos/testowner/testrepo/issues/20/comments", func(w http.ResponseWriter, r *http.Request) {
+		commentCount++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gogithub.IssueComment{ID: gogithub.Ptr(int64(1))})
+	})
+	ghServer := httptest.NewServer(ghMux)
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHub(t, ghServer.URL)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	// First event: "opened" with ai-task label — should create a task.
+	openedEvent := gogithub.IssuesEvent{
+		Action: gogithub.Ptr("opened"),
+		Issue: &gogithub.Issue{
+			Number: gogithub.Ptr(20),
+			Title:  gogithub.Ptr("Dedup test"),
+			Body:   gogithub.Ptr("Testing dedup."),
+			Labels: []*gogithub.Label{{Name: gogithub.Ptr("ai-task")}},
+		},
+		Repo: &gogithub.Repository{
+			Name:          gogithub.Ptr("testrepo"),
+			CloneURL:      gogithub.Ptr("https://github.com/testowner/testrepo.git"),
+			DefaultBranch: gogithub.Ptr("main"),
+			Owner:         &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload, _ := json.Marshal(openedEvent)
+	sig := signPayload(payload, testWebhookSecret)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	req.Header.Set("X-GitHub-Event", "issues")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for opened event, got %d", resp.StatusCode)
+	}
+
+	// Second event: "labeled" for the same issue — should be deduplicated.
+	labeledEvent := gogithub.IssuesEvent{
+		Action: gogithub.Ptr("labeled"),
+		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Issue: &gogithub.Issue{
+			Number: gogithub.Ptr(20),
+			Title:  gogithub.Ptr("Dedup test"),
+			Body:   gogithub.Ptr("Testing dedup."),
+			Labels: []*gogithub.Label{{Name: gogithub.Ptr("ai-task")}},
+		},
+		Repo: &gogithub.Repository{
+			Name:          gogithub.Ptr("testrepo"),
+			CloneURL:      gogithub.Ptr("https://github.com/testowner/testrepo.git"),
+			DefaultBranch: gogithub.Ptr("main"),
+			Owner:         &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload2, _ := json.Marshal(labeledEvent)
+	sig2 := signPayload(payload2, testWebhookSecret)
+
+	req2, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload2)))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-Hub-Signature-256", sig2)
+	req2.Header.Set("X-GitHub-Event", "issues")
+
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for labeled event, got %d", resp2.StatusCode)
+	}
+
+	// Verify only one task was created.
+	tasks, err := s.ListTasks(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task (dedup), got %d", len(tasks))
+	}
+
+	// Verify only one comment was posted.
+	if commentCount != 1 {
+		t.Fatalf("expected 1 comment, got %d", commentCount)
+	}
+}
+
 func TestGitHubWebhook_IssuesOpened_WithoutAITaskLabel(t *testing.T) {
 	ghServer := httptest.NewServer(http.NewServeMux())
 	defer ghServer.Close()

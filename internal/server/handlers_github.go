@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -69,6 +70,17 @@ func (s *Server) handleIssuesEvent(r *http.Request, event *gogithub.IssuesEvent)
 	s.logger.Info("processing ai-task label",
 		"owner", owner, "repo", repoName, "issue", issueNumber)
 
+	// Deduplicate: skip if a non-failed task already exists for this issue.
+	existing, err := s.store.GetTaskByGithubIssue(r.Context(), owner, repoName, issueNumber)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("checking existing task: %w", err)
+	}
+	if existing != nil {
+		s.logger.Info("task already exists for issue, skipping",
+			"existing_task", existing.ID, "issue", issueNumber)
+		return nil
+	}
+
 	prompt := issue.GetTitle()
 	if body := issue.GetBody(); body != "" {
 		prompt = prompt + "\n\n" + body
@@ -102,7 +114,7 @@ func (s *Server) handleIssuesEvent(r *http.Request, event *gogithub.IssuesEvent)
 			"I'll post updates here as I progress through planning, implementation, and PR creation.",
 		task.ID,
 	)
-	_, _, err := s.githubClient.Issues.CreateComment(r.Context(), owner, repoName, issueNumber,
+	_, _, err = s.githubClient.Issues.CreateComment(r.Context(), owner, repoName, issueNumber,
 		&gogithub.IssueComment{Body: gogithub.Ptr(comment)})
 	if err != nil {
 		s.logger.Error("failed to post acknowledgement comment", "issue", issueNumber, "error", err)

@@ -164,6 +164,60 @@ func TestDeleteTask(t *testing.T) {
 	}
 }
 
+func TestGetTaskByGithubIssue(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	owner := "testowner"
+	repo := "testrepo"
+	issue := 42
+
+	// No task exists yet — should return ErrNotFound.
+	_, err := s.GetTaskByGithubIssue(ctx, owner, repo, issue)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	// Create a queued task for the issue.
+	task := &Task{
+		Prompt:      "implement feature",
+		RepoURL:     "https://github.com/testowner/testrepo.git",
+		SourceType:  "github",
+		GithubOwner: &owner,
+		GithubRepo:  &repo,
+		GithubIssue: &issue,
+		SessionID:   "s1",
+	}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should find the task.
+	got, err := s.GetTaskByGithubIssue(ctx, owner, repo, issue)
+	if err != nil {
+		t.Fatal("expected task, got error:", err)
+	}
+	if got.ID != task.ID {
+		t.Fatalf("expected task ID %q, got %q", task.ID, got.ID)
+	}
+
+	// Mark as failed — should no longer match.
+	task.Status = "failed"
+	if err := s.UpdateTask(ctx, task.ID, task); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.GetTaskByGithubIssue(ctx, owner, repo, issue)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for failed task, got %v", err)
+	}
+
+	// Different issue number — should not match.
+	_, err = s.GetTaskByGithubIssue(ctx, owner, repo, 99)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for different issue, got %v", err)
+	}
+}
+
 func TestCreateTaskLog(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
