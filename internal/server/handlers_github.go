@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	gogithub "github.com/google/go-github/v83/github"
 	"github.com/google/uuid"
@@ -93,7 +94,7 @@ func (s *Server) handleIssuesEvent(r *http.Request, event *gogithub.IssuesEvent)
 
 	task := &store.Task{
 		Prompt:      prompt,
-		RepoURL:     repo.GetCloneURL(),
+		RepoURL:     strings.TrimSuffix(repo.GetCloneURL(), ".git"),
 		BaseBranch:  baseBranch,
 		SourceType:  "github",
 		GithubOwner: &owner,

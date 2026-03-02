@@ -168,8 +168,8 @@ func TestGitHubWebhook_IssuesLabeled_CreatesTask(t *testing.T) {
 	if !strings.Contains(task.Prompt, "Redis caching") {
 		t.Fatalf("expected prompt to contain body, got %q", task.Prompt)
 	}
-	if task.RepoURL != "https://github.com/testowner/testrepo.git" {
-		t.Fatalf("expected repo_url, got %q", task.RepoURL)
+	if task.RepoURL != "https://github.com/testowner/testrepo" {
+		t.Fatalf("expected repo_url without .git suffix, got %q", task.RepoURL)
 	}
 	if task.BaseBranch != "main" {
 		t.Fatalf("expected base_branch 'main', got %q", task.BaseBranch)
