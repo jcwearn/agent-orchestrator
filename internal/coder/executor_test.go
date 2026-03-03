@@ -201,3 +201,31 @@ func TestListWorkspaces_InvalidJSON(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+func TestSSH_NoExplicitBashShell(t *testing.T) {
+	// Regression: coder ssh joins args after "--" with spaces before sending
+	// to the remote shell. Using "bash", "-c", command as separate args caused
+	// the remote shell to run "bash -c <first-word>" instead of the full command.
+	var capturedArgs []string
+	creator := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		capturedArgs = append([]string{name}, args...)
+		// Return a no-op command.
+		return exec.CommandContext(ctx, "true")
+	}
+	e := NewExecutor(slog.Default(), creator)
+
+	var stdout, stderr bytes.Buffer
+	_, _ = e.SSH(context.Background(), "ws-1", "test -d /home/coder/repo/.git", &stdout, &stderr)
+
+	// Expected: ["coder", "ssh", "ws-1", "--", "test -d /home/coder/repo/.git"]
+	// The command must be a single arg after "--", not split into "bash", "-c", command.
+	if len(capturedArgs) != 5 {
+		t.Fatalf("expected 5 args, got %d: %v", len(capturedArgs), capturedArgs)
+	}
+	if capturedArgs[3] != "--" {
+		t.Fatalf("expected arg[3] = '--', got %q", capturedArgs[3])
+	}
+	if capturedArgs[4] != "test -d /home/coder/repo/.git" {
+		t.Fatalf("expected arg[4] = full command string, got %q", capturedArgs[4])
+	}
+}
