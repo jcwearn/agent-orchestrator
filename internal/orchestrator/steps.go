@@ -100,7 +100,7 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 	return nil
 }
 
-// stepImplement resumes the Claude session to implement the approved plan.
+// stepImplement invokes Claude CLI to implement the approved plan.
 // The repo is already present from the workspace template.
 func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, workspace string) error {
 	stdout := o.newLogWriter(ctx, task.ID, "implement", "stdout")
@@ -112,10 +112,9 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 	}
 
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude --resume %s -p %s --print",
+		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude -p %s --print",
 		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
-		shellQuote(task.SessionID),
 		shellQuote(buildImplementPrompt(task)),
 	)
 

@@ -218,6 +218,61 @@ func TestGetTaskByGithubIssue(t *testing.T) {
 	}
 }
 
+func TestCreateTask_DuplicateGitHubIssue(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	owner := "testowner"
+	repo := "testrepo"
+	issue := 42
+
+	first := &Task{
+		Prompt:      "implement feature",
+		RepoURL:     "https://github.com/testowner/testrepo",
+		SourceType:  "github",
+		GithubOwner: &owner,
+		GithubRepo:  &repo,
+		GithubIssue: &issue,
+		SessionID:   "s1",
+	}
+	if err := s.CreateTask(ctx, first); err != nil {
+		t.Fatal("first create should succeed:", err)
+	}
+
+	// Second create for the same issue should return ErrDuplicateTask.
+	second := &Task{
+		Prompt:      "implement feature (dup)",
+		RepoURL:     "https://github.com/testowner/testrepo",
+		SourceType:  "github",
+		GithubOwner: &owner,
+		GithubRepo:  &repo,
+		GithubIssue: &issue,
+		SessionID:   "s2",
+	}
+	if err := s.CreateTask(ctx, second); !errors.Is(err, ErrDuplicateTask) {
+		t.Fatalf("expected ErrDuplicateTask, got %v", err)
+	}
+
+	// After marking first as failed, a retry should succeed.
+	first.Status = "failed"
+	if err := s.UpdateTask(ctx, first.ID, first); err != nil {
+		t.Fatal("update to failed:", err)
+	}
+
+	third := &Task{
+		Prompt:      "implement feature (retry)",
+		RepoURL:     "https://github.com/testowner/testrepo",
+		SourceType:  "github",
+		GithubOwner: &owner,
+		GithubRepo:  &repo,
+		GithubIssue: &issue,
+		SessionID:   "s3",
+	}
+	if err := s.CreateTask(ctx, third); err != nil {
+		t.Fatal("retry after failure should succeed:", err)
+	}
+}
+
 func TestCreateTaskLog(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

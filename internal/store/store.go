@@ -10,6 +10,7 @@ import (
 )
 
 var ErrNotFound = errors.New("not found")
+var ErrDuplicateTask = errors.New("duplicate task")
 
 type Store struct {
 	db     *sql.DB
