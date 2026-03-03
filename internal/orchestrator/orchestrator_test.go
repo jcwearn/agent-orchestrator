@@ -604,14 +604,15 @@ func TestMultipleTasksQueueing(t *testing.T) {
 // --- mock notifier ---
 
 type mockNotifier struct {
-	mu               sync.Mutex
-	planReadyCalls   []string
-	checkCalls       []string
-	completeCalls    []string
-	failedCalls      []string
-	planReadyResult  int64
-	checkApproved    bool
-	checkFeedback    string
+	mu                      sync.Mutex
+	planReadyCalls          []string
+	checkCalls              []string
+	implStartedCalls        []string
+	completeCalls           []string
+	failedCalls             []string
+	planReadyResult         int64
+	checkApproved           bool
+	checkFeedback           string
 }
 
 func newMockNotifier() *mockNotifier {
@@ -630,6 +631,13 @@ func (m *mockNotifier) CheckApproval(ctx context.Context, owner, repo string, is
 	defer m.mu.Unlock()
 	m.checkCalls = append(m.checkCalls, fmt.Sprintf("%s/%s#%d@%d", owner, repo, issue, commentID))
 	return m.checkApproved, m.checkFeedback, nil
+}
+
+func (m *mockNotifier) NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.implStartedCalls = append(m.implStartedCalls, fmt.Sprintf("%s/%s#%d", owner, repo, issue))
+	return nil
 }
 
 func (m *mockNotifier) NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error {
@@ -1147,5 +1155,123 @@ func TestWaitForAgentReady_Timeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("expected timeout message, got: %v", err)
+	}
+}
+
+func TestExtractPRUrl(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantURL  string
+		wantNum  int
+	}{
+		{"empty", "", "", 0},
+		{"no match", "all done, pushed to origin", "", 0},
+		{"gh pr create output", "https://github.com/user/repo/pull/42\n", "https://github.com/user/repo/pull/42", 42},
+		{"embedded in text", "Created PR: https://github.com/org/project/pull/123 done", "https://github.com/org/project/pull/123", 123},
+		{"multiple matches returns first", "https://github.com/a/b/pull/1\nhttps://github.com/a/b/pull/2", "https://github.com/a/b/pull/1", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, num := extractPRUrl(tt.input)
+			if url != tt.wantURL {
+				t.Errorf("extractPRUrl() url = %q, want %q", url, tt.wantURL)
+			}
+			if num != tt.wantNum {
+				t.Errorf("extractPRUrl() num = %d, want %d", num, tt.wantNum)
+			}
+		})
+	}
+}
+
+func TestRunImplement_CapturesPRUrl(t *testing.T) {
+	exec := newMockExecutor()
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		if !strings.Contains(command, "test -d") {
+			_, _ = fmt.Fprint(stdout, "Created branch feat/foo\nhttps://github.com/test/repo/pull/99\n")
+		}
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	o, s := testOrchestrator(t, exec, nil)
+	ctx := context.Background()
+
+	task := createTask(t, s, "pr capture")
+	task.Status = StatusImplementing
+	task.Plan = strPtr("the plan")
+	task.PlanFeedback = strPtr("approved")
+	_ = s.UpdateTask(ctx, task.ID, task)
+
+	ws, _ := o.pool.Acquire(task.ID)
+	o.runImplement(ctx, task, ws)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusComplete {
+		t.Fatalf("expected complete, got %s", updated.Status)
+	}
+	if updated.PRUrl == nil || *updated.PRUrl != "https://github.com/test/repo/pull/99" {
+		t.Fatalf("expected PR URL, got %v", updated.PRUrl)
+	}
+	if updated.PRNumber == nil || *updated.PRNumber != 99 {
+		t.Fatalf("expected PR number 99, got %v", updated.PRNumber)
+	}
+}
+
+func TestProcessApprovedTasks_GitHubNotifyImplementationStarted(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	notifier.checkApproved = true
+
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "github impl started")
+	task.Status = StatusAwaitingApproval
+	task.Plan = strPtr("the plan")
+	commentID := 42
+	task.PlanCommentID = &commentID
+	_ = s.UpdateTask(ctx, task.ID, task)
+
+	if err := o.processApprovedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, s, task.ID, StatusComplete, 5*time.Second)
+
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.implStartedCalls) != 1 {
+		t.Fatalf("expected 1 impl started call, got %d", len(notifier.implStartedCalls))
+	}
+	if notifier.implStartedCalls[0] != "test/repo#1" {
+		t.Fatalf("unexpected call: %s", notifier.implStartedCalls[0])
+	}
+}
+
+func TestBuildImplementPrompt_RunTests(t *testing.T) {
+	task := &store.Task{
+		Plan:     strPtr("the plan"),
+		RunTests: true,
+	}
+	prompt := buildImplementPrompt(task)
+	if !strings.Contains(prompt, "Run the project's test suite") {
+		t.Fatalf("expected test instruction, got: %s", prompt)
+	}
+	if strings.Contains(prompt, "Create a new branch, make all changes, commit, and push") {
+		t.Fatal("should not contain old explicit git instructions")
+	}
+}
+
+func TestBuildImplementPrompt_NoTests(t *testing.T) {
+	task := &store.Task{
+		Plan:     strPtr("the plan"),
+		RunTests: false,
+	}
+	prompt := buildImplementPrompt(task)
+	if strings.Contains(prompt, "Run the project's test suite") {
+		t.Fatal("should not contain test instruction when RunTests is false")
+	}
+	if !strings.Contains(prompt, "Follow your git workflow rules") {
+		t.Fatalf("expected git workflow rules reference, got: %s", prompt)
 	}
 }

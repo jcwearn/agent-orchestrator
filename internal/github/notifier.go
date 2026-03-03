@@ -120,6 +120,12 @@ func (n *Notifier) CheckApproval(ctx context.Context, owner, repo string, issue 
 	return ApprovalResult{}, nil
 }
 
+// NotifyImplementationStarted posts a comment indicating implementation has begun.
+func (n *Notifier) NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error {
+	body := "## Implementation Started\n\nThe plan has been approved. Implementation is now in progress..."
+	return n.postComment(ctx, owner, repo, issue, body)
+}
+
 // NotifyComplete posts the completion message with PR link.
 func (n *Notifier) NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error {
 	body := fmt.Sprintf("## Task Complete\n\nPull request created: %s", prURL)

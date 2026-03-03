@@ -191,6 +191,10 @@ func (a *notifierAdapter) CheckApproval(ctx context.Context, owner, repo string,
 	return false, result.Feedback, nil
 }
 
+func (a *notifierAdapter) NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error {
+	return a.notifier.NotifyImplementationStarted(ctx, owner, repo, issue)
+}
+
 func (a *notifierAdapter) NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error {
 	return a.notifier.NotifyComplete(ctx, owner, repo, issue, prURL)
 }
