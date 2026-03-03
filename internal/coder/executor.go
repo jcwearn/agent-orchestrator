@@ -66,7 +66,7 @@ func (e *Executor) SSH(ctx context.Context, workspace, command string, stdout, s
 // StartWorkspace starts a Coder workspace via `coder start --yes`.
 // Template parameters (e.g. repo_url) are passed as --parameter key=value flags.
 func (e *Executor) StartWorkspace(ctx context.Context, workspace string, params map[string]string) error {
-	args := []string{"start", workspace, "--yes"}
+	args := []string{"start", workspace, "--yes", "--always-prompt"}
 	for k, v := range params {
 		args = append(args, "--parameter", k+"="+v)
 	}
