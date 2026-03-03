@@ -104,6 +104,11 @@ func (s *Server) handleIssuesEvent(r *http.Request, event *gogithub.IssuesEvent)
 	}
 
 	if err := s.store.CreateTask(r.Context(), task); err != nil {
+		if errors.Is(err, store.ErrDuplicateTask) {
+			s.logger.Info("duplicate task prevented by constraint, skipping",
+				"owner", owner, "repo", repoName, "issue", issueNumber)
+			return nil
+		}
 		return fmt.Errorf("creating task: %w", err)
 	}
 

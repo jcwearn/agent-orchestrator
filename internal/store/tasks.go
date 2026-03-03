@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,6 +62,9 @@ func (s *Store) CreateTask(ctx context.Context, t *Task) error {
 		t.CreatedAt, t.StartedAt, t.CompletedAt, t.ErrorMessage,
 	)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrDuplicateTask
+		}
 		return fmt.Errorf("insert task: %w", err)
 	}
 	return nil
