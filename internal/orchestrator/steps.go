@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path"
@@ -10,6 +11,19 @@ import (
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
+// verifyRepoDir checks that the expected repo directory exists in the workspace.
+// This catches cases where the Coder parameter didn't apply (stale workspace,
+// parameter mismatch, clone failure).
+func (o *Orchestrator) verifyRepoDir(ctx context.Context, workspace, repoDir string) error {
+	var stdout, stderr bytes.Buffer
+	cmd := fmt.Sprintf("test -d %s/.git", shellQuote(repoDir))
+	_, err := o.executor.SSH(ctx, workspace, cmd, &stdout, &stderr)
+	if err != nil {
+		return fmt.Errorf("repo directory %s not found in workspace: %w", repoDir, err)
+	}
+	return nil
+}
+
 // stepPlan invokes Claude CLI to produce a plan. The repo is already cloned
 // by the workspace template via the repo_url parameter.
 func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace string) error {
@@ -17,8 +31,11 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 	stderr := o.newLogWriter(ctx, task.ID, "plan", "stderr")
 
 	repoDir := "/home/coder/" + repoName(task.RepoURL)
+	if err := o.verifyRepoDir(ctx, workspace, repoDir); err != nil {
+		return err
+	}
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude --session-id %s --permission-mode plan -p %s --print",
+		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude --session-id %s -p %s --print",
 		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
 		shellQuote(task.SessionID),
@@ -53,6 +70,10 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 	stderr := o.newLogWriter(ctx, task.ID, "implement", "stderr")
 
 	repoDir := "/home/coder/" + repoName(task.RepoURL)
+	if err := o.verifyRepoDir(ctx, workspace, repoDir); err != nil {
+		return err
+	}
+
 	cmd := fmt.Sprintf(
 		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude --resume %s -p %s --print",
 		shellQuote(repoDir),

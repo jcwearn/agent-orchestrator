@@ -78,6 +78,7 @@ func (e *Executor) StartWorkspace(ctx context.Context, workspace string, params 
 	if err != nil {
 		return fmt.Errorf("start workspace %q: %s: %w", workspace, string(out), err)
 	}
+	e.logger.Info("workspace started", "workspace", workspace, "output", string(out))
 	return nil
 }
 

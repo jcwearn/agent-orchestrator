@@ -36,7 +36,9 @@ type sshCall struct {
 func newMockExecutor() *mockExecutor {
 	return &mockExecutor{
 		sshFunc: func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-			_, _ = fmt.Fprint(stdout, "mock plan output")
+			if !strings.Contains(command, "test -d") {
+				_, _ = fmt.Fprint(stdout, "mock plan output")
+			}
 			return &coder.SSHResult{ExitCode: 0}, nil
 		},
 		startFunc: func(ctx context.Context, workspace string, params map[string]string) error { return nil },
@@ -192,7 +194,9 @@ func TestTick_NoFreeWorkspace(t *testing.T) {
 func TestRunTask_PlanSuccess(t *testing.T) {
 	exec := newMockExecutor()
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-		_, _ = fmt.Fprint(stdout, "the generated plan")
+		if !strings.Contains(command, "test -d") {
+			_, _ = fmt.Fprint(stdout, "the generated plan")
+		}
 		return &coder.SSHResult{ExitCode: 0}, nil
 	}
 
@@ -219,20 +223,24 @@ func TestRunTask_PlanSuccess(t *testing.T) {
 	if o.pool.FreeCount() != len(coder.DefaultWorkspaces) {
 		t.Fatal("workspace not released")
 	}
-	// SSH command should contain --permission-mode plan.
+	// First SSH call should be the repo dir verification.
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
-	if len(exec.sshCalls) == 0 {
-		t.Fatal("expected at least one SSH call")
+	if len(exec.sshCalls) < 2 {
+		t.Fatalf("expected at least 2 SSH calls (verify + plan), got %d", len(exec.sshCalls))
 	}
-	if !strings.Contains(exec.sshCalls[0].Command, "--permission-mode plan") {
-		t.Fatalf("expected --permission-mode plan in command, got: %s", exec.sshCalls[0].Command)
+	if !strings.Contains(exec.sshCalls[0].Command, "test -d") {
+		t.Fatalf("expected first SSH call to be repo dir verify, got: %s", exec.sshCalls[0].Command)
 	}
-	if !strings.Contains(exec.sshCalls[0].Command, "> /dev/null 2>&1") {
-		t.Fatalf("expected git checkout redirected to /dev/null, got: %s", exec.sshCalls[0].Command)
+	// Plan command should NOT contain --permission-mode plan.
+	if strings.Contains(exec.sshCalls[1].Command, "--permission-mode plan") {
+		t.Fatalf("plan command should not contain --permission-mode plan, got: %s", exec.sshCalls[1].Command)
 	}
-	if !strings.Contains(exec.sshCalls[0].Command, "TERM=dumb claude") {
-		t.Fatalf("expected TERM=dumb before claude command, got: %s", exec.sshCalls[0].Command)
+	if !strings.Contains(exec.sshCalls[1].Command, "> /dev/null 2>&1") {
+		t.Fatalf("expected git checkout redirected to /dev/null, got: %s", exec.sshCalls[1].Command)
+	}
+	if !strings.Contains(exec.sshCalls[1].Command, "TERM=dumb claude") {
+		t.Fatalf("expected TERM=dumb before claude command, got: %s", exec.sshCalls[1].Command)
 	}
 }
 
@@ -311,20 +319,27 @@ func TestRunImplement_Success(t *testing.T) {
 	if o.pool.FreeCount() != len(coder.DefaultWorkspaces) {
 		t.Fatal("workspace not released")
 	}
-	// Implement command should NOT contain --permission-mode plan.
+	// First SSH call is repo dir verify, second is the implement command.
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
-	if len(exec.sshCalls) == 0 {
-		t.Fatal("expected at least one SSH call")
+	if len(exec.sshCalls) < 2 {
+		t.Fatalf("expected at least 2 SSH calls (verify + implement), got %d", len(exec.sshCalls))
 	}
-	if strings.Contains(exec.sshCalls[0].Command, "--permission-mode plan") {
-		t.Fatalf("implement command should not contain --permission-mode plan, got: %s", exec.sshCalls[0].Command)
+	if !strings.Contains(exec.sshCalls[0].Command, "test -d") {
+		t.Fatalf("expected first SSH call to be repo dir verify, got: %s", exec.sshCalls[0].Command)
+	}
+	if strings.Contains(exec.sshCalls[1].Command, "--permission-mode plan") {
+		t.Fatalf("implement command should not contain --permission-mode plan, got: %s", exec.sshCalls[1].Command)
 	}
 }
 
 func TestRunImplement_Failure(t *testing.T) {
 	exec := newMockExecutor()
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		// Verify call succeeds, implement call fails.
+		if strings.Contains(command, "test -d") {
+			return &coder.SSHResult{ExitCode: 0}, nil
+		}
 		_, _ = fmt.Fprint(stderr, "Error: authentication failed\nfatal: could not push")
 		return nil, errors.New("implement failed")
 	}
@@ -479,10 +494,9 @@ func TestLogWriter(t *testing.T) {
 func TestFullLifecycle(t *testing.T) {
 	exec := newMockExecutor()
 	planOutput := "detailed plan"
-	callCount := 0
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-		callCount++
-		if callCount == 1 {
+		// Write plan output only for the Claude plan command (not verify or implement).
+		if !strings.Contains(command, "test -d") && strings.Contains(command, "--session-id") {
 			_, _ = fmt.Fprint(stdout, planOutput)
 		}
 		return &coder.SSHResult{ExitCode: 0}, nil
@@ -520,8 +534,10 @@ func TestMultipleTasksQueueing(t *testing.T) {
 	exec := newMockExecutor()
 	// Make SSH slow enough that both goroutines are still running when we check.
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-		time.Sleep(200 * time.Millisecond)
-		_, _ = fmt.Fprint(stdout, "plan")
+		if !strings.Contains(command, "test -d") {
+			time.Sleep(200 * time.Millisecond)
+			_, _ = fmt.Fprint(stdout, "plan")
+		}
 		return &coder.SSHResult{ExitCode: 0}, nil
 	}
 
@@ -634,7 +650,9 @@ func createGitHubTask(t *testing.T, s *store.Store, prompt string) *store.Task {
 func TestRunTask_GitHubNotifyPlanReady(t *testing.T) {
 	exec := newMockExecutor()
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-		_, _ = fmt.Fprint(stdout, "the plan")
+		if !strings.Contains(command, "test -d") {
+			_, _ = fmt.Fprint(stdout, "the plan")
+		}
 		return &coder.SSHResult{ExitCode: 0}, nil
 	}
 
@@ -670,7 +688,9 @@ func TestRunTask_GitHubNotifyPlanReady(t *testing.T) {
 func TestRunTask_NonGitHubSkipsNotifier(t *testing.T) {
 	exec := newMockExecutor()
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
-		_, _ = fmt.Fprint(stdout, "the plan")
+		if !strings.Contains(command, "test -d") {
+			_, _ = fmt.Fprint(stdout, "the plan")
+		}
 		return &coder.SSHResult{ExitCode: 0}, nil
 	}
 
@@ -878,6 +898,9 @@ func TestStripANSI(t *testing.T) {
 func TestStepPlan_EmptyOutput(t *testing.T) {
 	exec := newMockExecutor()
 	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		if strings.Contains(command, "test -d") {
+			return &coder.SSHResult{ExitCode: 0}, nil
+		}
 		// Simulate PTY junk: SSH succeeds but stdout is empty/whitespace.
 		_, _ = fmt.Fprint(stdout, "   \n\n  ")
 		_, _ = fmt.Fprint(stderr, "some debug output")
@@ -899,6 +922,76 @@ func TestStepPlan_EmptyOutput(t *testing.T) {
 	}
 	if updated.ErrorMessage == nil || !strings.Contains(*updated.ErrorMessage, "empty output") {
 		t.Fatalf("expected error about empty output, got: %v", updated.ErrorMessage)
+	}
+}
+
+func TestStepPlan_VerifyRepoDirFailure(t *testing.T) {
+	exec := newMockExecutor()
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		if strings.Contains(command, "test -d") {
+			return &coder.SSHResult{ExitCode: 1}, fmt.Errorf("command exited with code 1: exit status 1")
+		}
+		_, _ = fmt.Fprint(stdout, "should not reach here")
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	o, s := testOrchestrator(t, exec, nil)
+	ctx := context.Background()
+	task := createTask(t, s, "missing repo")
+
+	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
+	o.runTask(ctx, task, ws)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusFailed {
+		t.Fatalf("expected failed, got %s", updated.Status)
+	}
+	if updated.ErrorMessage == nil || !strings.Contains(*updated.ErrorMessage, "repo directory") {
+		t.Fatalf("expected error about repo directory, got: %v", updated.ErrorMessage)
+	}
+	// Only the verify SSH call should have been made (no Claude call).
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if len(exec.sshCalls) != 1 {
+		t.Fatalf("expected 1 SSH call (verify only), got %d", len(exec.sshCalls))
+	}
+}
+
+func TestStepPlan_VerifyRepoDirSuccess(t *testing.T) {
+	exec := newMockExecutor()
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		if !strings.Contains(command, "test -d") {
+			_, _ = fmt.Fprint(stdout, "the plan")
+		}
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	o, s := testOrchestrator(t, exec, nil)
+	ctx := context.Background()
+	task := createTask(t, s, "valid repo")
+
+	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
+	o.runTask(ctx, task, ws)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusAwaitingApproval {
+		t.Fatalf("expected awaiting_approval, got %s", updated.Status)
+	}
+	if updated.Plan == nil || *updated.Plan != "the plan" {
+		t.Fatalf("expected plan to be captured, got %v", updated.Plan)
+	}
+	// Both verify and Claude SSH calls should have been made.
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if len(exec.sshCalls) != 2 {
+		t.Fatalf("expected 2 SSH calls (verify + plan), got %d", len(exec.sshCalls))
+	}
+	if !strings.Contains(exec.sshCalls[0].Command, "test -d") {
+		t.Fatalf("expected first call to be verify, got: %s", exec.sshCalls[0].Command)
 	}
 }
 
