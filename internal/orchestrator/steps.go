@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,6 +126,14 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 
 	if err != nil {
 		return fmt.Errorf("implement step: %w\n\nstderr tail:\n%s", err, stderr.Tail(20))
+	}
+
+	// Parse PR URL from output (gh pr create prints the URL to stdout).
+	if prURL, prNumber := extractPRUrl(stdout.String()); prURL != "" {
+		task.PRUrl = &prURL
+		if prNumber > 0 {
+			task.PRNumber = &prNumber
+		}
 	}
 	return nil
 }
@@ -282,11 +292,27 @@ func buildPlanPrompt(task *store.Task) string {
 }
 
 func buildImplementPrompt(task *store.Task) string {
-	return fmt.Sprintf(
+	prompt := fmt.Sprintf(
 		"The plan has been approved. Implement it now. "+
-			"Create a new branch, make all changes, commit, and push.\n\nApproved plan:\n%s",
+			"Follow your git workflow rules for branching, committing, and PR creation.\n\nApproved plan:\n%s",
 		stringVal(task.Plan),
 	)
+	if task.RunTests {
+		prompt += "\n\nIMPORTANT: Run the project's test suite before committing to verify nothing is broken."
+	}
+	return prompt
+}
+
+var prURLRe = regexp.MustCompile(`https://github\.com/[^/]+/[^/]+/pull/(\d+)`)
+
+// extractPRUrl finds a GitHub PR URL in the output and returns the URL and PR number.
+func extractPRUrl(output string) (string, int) {
+	m := prURLRe.FindStringSubmatch(output)
+	if m == nil {
+		return "", 0
+	}
+	num, _ := strconv.Atoi(m[1])
+	return m[0], num
 }
 
 func stringVal(s *string) string {

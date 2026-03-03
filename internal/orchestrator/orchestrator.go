@@ -15,6 +15,7 @@ import (
 type Notifier interface {
 	NotifyPlanReady(ctx context.Context, owner, repo string, issue int, plan string) (commentID int64, err error)
 	CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (approved bool, feedback string, err error)
+	NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error
 	NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error
 	NotifyFailed(ctx context.Context, owner, repo string, issue int, reason string) error
 }
@@ -184,6 +185,13 @@ func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
 			continue
 		}
 		o.publishEvent(t.ID, "task.updated")
+
+		// For GitHub tasks, post implementation-started comment (non-fatal).
+		if o.isGitHubTask(t) {
+			if err := o.config.Notifier.NotifyImplementationStarted(ctx, *t.GithubOwner, *t.GithubRepo, *t.GithubIssue); err != nil {
+				o.logger.Error("notify implementation started", "task_id", t.ID, "error", err)
+			}
+		}
 
 		go o.runImplement(ctx, t, workspace)
 	}

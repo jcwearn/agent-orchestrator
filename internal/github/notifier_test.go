@@ -312,6 +312,31 @@ func TestCheckApproval_NoReactionsNoComments(t *testing.T) {
 	}
 }
 
+func TestNotifyImplementationStarted(t *testing.T) {
+	ts, fg := newFakeGitHub()
+	defer ts.Close()
+
+	n := testNotifier(t, ts.URL)
+	ctx := context.Background()
+
+	if err := n.NotifyImplementationStarted(ctx, "owner", "repo", 1); err != nil {
+		t.Fatal(err)
+	}
+
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	if len(fg.comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(fg.comments))
+	}
+	body := fg.comments[0].GetBody()
+	if !strings.Contains(body, "Implementation Started") {
+		t.Error("comment should contain implementation started header")
+	}
+	if !strings.Contains(body, "in progress") {
+		t.Error("comment should contain in progress message")
+	}
+}
+
 func TestNotifyComplete(t *testing.T) {
 	ts, fg := newFakeGitHub()
 	defer ts.Close()
