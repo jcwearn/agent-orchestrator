@@ -95,7 +95,12 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 // startWorkspace starts the assigned workspace, passing the repo URL as a
 // template parameter so the workspace clones it on boot.
 func (o *Orchestrator) startWorkspace(ctx context.Context, task *store.Task, workspace string) error {
-	params := map[string]string{"git_repo": task.RepoURL}
+	params := map[string]string{
+		"git_repo":     task.RepoURL,
+		"cpu":          "4",
+		"memory":       "8",
+		"dotfiles_uri": "https://github.com/jcwearn/dotfiles-coder",
+	}
 	if err := o.executor.StartWorkspace(ctx, workspace, params); err != nil {
 		return fmt.Errorf("start workspace %s: %w", workspace, err)
 	}
