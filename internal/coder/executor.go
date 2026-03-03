@@ -114,8 +114,9 @@ func (e *Executor) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) 
 	infos := make([]WorkspaceInfo, len(raw))
 	for i, w := range raw {
 		infos[i] = WorkspaceInfo{
-			Name:   w.Name,
-			Status: parseWorkspaceStatus(w.LatestBuild.Status),
+			Name:           w.Name,
+			Status:         parseWorkspaceStatus(w.LatestBuild.Status),
+			AgentLifecycle: firstAgentLifecycle(w.LatestBuild.Resources),
 		}
 	}
 	return infos, nil
@@ -128,7 +129,16 @@ type coderWorkspace struct {
 }
 
 type coderBuild struct {
-	Status string `json:"status"`
+	Status    string          `json:"status"`
+	Resources []coderResource `json:"resources"`
+}
+
+type coderResource struct {
+	Agents []coderAgent `json:"agents"`
+}
+
+type coderAgent struct {
+	LifecycleState string `json:"lifecycle_state"`
 }
 
 // WorkspaceStatus represents the state of a Coder workspace.
@@ -150,8 +160,20 @@ const (
 
 // WorkspaceInfo holds the name and current status of a workspace.
 type WorkspaceInfo struct {
-	Name   string
-	Status WorkspaceStatus
+	Name           string
+	Status         WorkspaceStatus
+	AgentLifecycle string // "ready", "starting", "start_error", "start_timeout", etc.
+}
+
+// firstAgentLifecycle returns the lifecycle_state of the first agent found
+// across all resources, or "" if no agents exist.
+func firstAgentLifecycle(resources []coderResource) string {
+	for _, r := range resources {
+		for _, a := range r.Agents {
+			return a.LifecycleState
+		}
+	}
+	return ""
 }
 
 func parseWorkspaceStatus(s string) WorkspaceStatus {

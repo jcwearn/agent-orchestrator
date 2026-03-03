@@ -130,7 +130,8 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 }
 
 // startWorkspace starts the assigned workspace, passing the repo URL as a
-// template parameter so the workspace clones it on boot.
+// template parameter so the workspace clones it on boot. After the build
+// completes, it waits for the agent to reach "ready" before returning.
 func (o *Orchestrator) startWorkspace(ctx context.Context, task *store.Task, workspace string) error {
 	params := map[string]string{
 		"git_repo":     task.RepoURL,
@@ -141,9 +142,61 @@ func (o *Orchestrator) startWorkspace(ctx context.Context, task *store.Task, wor
 	if err := o.executor.StartWorkspace(ctx, workspace, params); err != nil {
 		return fmt.Errorf("start workspace %s: %w", workspace, err)
 	}
+	if err := o.waitForAgentReady(ctx, workspace); err != nil {
+		return fmt.Errorf("wait for workspace %s agent: %w", workspace, err)
+	}
 	ws := workspace
 	task.WorkspaceID = &ws
 	return nil
+}
+
+// waitForAgentReady polls ListWorkspaces until the named workspace's agent
+// reports lifecycle_state "ready". It returns an error immediately on
+// "start_error" or "start_timeout", and returns a timeout error if the agent
+// doesn't become ready within AgentReadyTimeout.
+func (o *Orchestrator) waitForAgentReady(ctx context.Context, workspace string) error {
+	timeout := o.config.AgentReadyTimeout
+	if timeout == 0 {
+		timeout = 2 * time.Minute
+	}
+	poll := o.config.AgentReadyPollInterval
+	if poll == 0 {
+		poll = 5 * time.Second
+	}
+
+	deadline := time.After(timeout)
+	for {
+		workspaces, err := o.executor.ListWorkspaces(ctx)
+		if err != nil {
+			return fmt.Errorf("list workspaces: %w", err)
+		}
+
+		for _, ws := range workspaces {
+			if ws.Name != workspace {
+				continue
+			}
+			switch ws.AgentLifecycle {
+			case "ready":
+				o.logger.Info("agent ready", "workspace", workspace)
+				return nil
+			case "start_error":
+				return fmt.Errorf("agent startup failed (lifecycle_state: start_error)")
+			case "start_timeout":
+				return fmt.Errorf("agent startup timed out (lifecycle_state: start_timeout)")
+			default:
+				o.logger.Debug("waiting for agent ready",
+					"workspace", workspace, "lifecycle_state", ws.AgentLifecycle)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled waiting for agent ready: %w", ctx.Err())
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for agent ready after %s", timeout)
+		case <-time.After(poll):
+		}
+	}
 }
 
 // stopAndRelease stops the workspace and releases it back to the pool.

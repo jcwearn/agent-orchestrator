@@ -23,6 +23,7 @@ type mockExecutor struct {
 	sshFunc     func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error)
 	startFunc   func(ctx context.Context, workspace string, params map[string]string) error
 	stopFunc    func(ctx context.Context, workspace string) error
+	listFunc    func(ctx context.Context) ([]coder.WorkspaceInfo, error)
 	sshCalls    []sshCall
 	startCalls  []string
 	stopCalls   []string
@@ -43,6 +44,13 @@ func newMockExecutor() *mockExecutor {
 		},
 		startFunc: func(ctx context.Context, workspace string, params map[string]string) error { return nil },
 		stopFunc:  func(ctx context.Context, workspace string) error { return nil },
+		listFunc: func(ctx context.Context) ([]coder.WorkspaceInfo, error) {
+			var infos []coder.WorkspaceInfo
+			for _, name := range coder.DefaultWorkspaces {
+				infos = append(infos, coder.WorkspaceInfo{Name: name, Status: coder.WorkspaceStatusRunning, AgentLifecycle: "ready"})
+			}
+			return infos, nil
+		},
 	}
 }
 
@@ -68,7 +76,7 @@ func (m *mockExecutor) StopWorkspace(ctx context.Context, workspace string) erro
 }
 
 func (m *mockExecutor) ListWorkspaces(ctx context.Context) ([]coder.WorkspaceInfo, error) {
-	return nil, nil
+	return m.listFunc(ctx)
 }
 
 // --- test helpers ---
@@ -95,7 +103,12 @@ func testOrchestrator(t *testing.T, exec *mockExecutor, pool *coder.Pool) (*Orch
 	if pool == nil {
 		pool = coder.NewPool(coder.DefaultWorkspaces)
 	}
-	o := New(s, exec, pool, slog.Default(), Config{TickInterval: 50 * time.Millisecond, VerifyRetryDelay: 10 * time.Millisecond})
+	o := New(s, exec, pool, slog.Default(), Config{
+		TickInterval:           50 * time.Millisecond,
+		VerifyRetryDelay:       10 * time.Millisecond,
+		AgentReadyTimeout:      2 * time.Second,
+		AgentReadyPollInterval: 10 * time.Millisecond,
+	})
 	return o, s
 }
 
@@ -539,6 +552,12 @@ func TestMultipleTasksQueueing(t *testing.T) {
 			_, _ = fmt.Fprint(stdout, "plan")
 		}
 		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+	exec.listFunc = func(ctx context.Context) ([]coder.WorkspaceInfo, error) {
+		return []coder.WorkspaceInfo{
+			{Name: "ws-1", Status: coder.WorkspaceStatusRunning, AgentLifecycle: "ready"},
+			{Name: "ws-2", Status: coder.WorkspaceStatusRunning, AgentLifecycle: "ready"},
+		}, nil
 	}
 
 	pool := coder.NewPool([]string{"ws-1", "ws-2"})
@@ -1051,5 +1070,82 @@ func TestLogWriter_Tail(t *testing.T) {
 	all := w.Tail(100)
 	if all != "line1\nline2\nline3\nline4\nline5" {
 		t.Fatalf("Tail(100) = %q, want all lines", all)
+	}
+}
+
+func TestWaitForAgentReady_ImmediateReady(t *testing.T) {
+	exec := newMockExecutor()
+	exec.listFunc = func(ctx context.Context) ([]coder.WorkspaceInfo, error) {
+		return []coder.WorkspaceInfo{
+			{Name: "ws-1", Status: coder.WorkspaceStatusRunning, AgentLifecycle: "ready"},
+		}, nil
+	}
+
+	o, _ := testOrchestrator(t, exec, nil)
+	if err := o.waitForAgentReady(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestWaitForAgentReady_TransitionToReady(t *testing.T) {
+	exec := newMockExecutor()
+	var calls int
+	exec.listFunc = func(ctx context.Context) ([]coder.WorkspaceInfo, error) {
+		calls++
+		state := "starting"
+		if calls >= 3 {
+			state = "ready"
+		}
+		return []coder.WorkspaceInfo{
+			{Name: "ws-1", Status: coder.WorkspaceStatusRunning, AgentLifecycle: state},
+		}, nil
+	}
+
+	o, _ := testOrchestrator(t, exec, nil)
+	if err := o.waitForAgentReady(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if calls < 3 {
+		t.Fatalf("expected at least 3 list calls, got %d", calls)
+	}
+}
+
+func TestWaitForAgentReady_StartError(t *testing.T) {
+	exec := newMockExecutor()
+	exec.listFunc = func(ctx context.Context) ([]coder.WorkspaceInfo, error) {
+		return []coder.WorkspaceInfo{
+			{Name: "ws-1", Status: coder.WorkspaceStatusRunning, AgentLifecycle: "start_error"},
+		}, nil
+	}
+
+	o, _ := testOrchestrator(t, exec, nil)
+	err := o.waitForAgentReady(context.Background(), "ws-1")
+	if err == nil {
+		t.Fatal("expected error for start_error lifecycle")
+	}
+	if !strings.Contains(err.Error(), "start_error") {
+		t.Fatalf("expected start_error in message, got: %v", err)
+	}
+}
+
+func TestWaitForAgentReady_Timeout(t *testing.T) {
+	exec := newMockExecutor()
+	exec.listFunc = func(ctx context.Context) ([]coder.WorkspaceInfo, error) {
+		return []coder.WorkspaceInfo{
+			{Name: "ws-1", Status: coder.WorkspaceStatusRunning, AgentLifecycle: "starting"},
+		}, nil
+	}
+
+	o, _ := testOrchestrator(t, exec, nil)
+	// Override with a very short timeout for this test.
+	o.config.AgentReadyTimeout = 100 * time.Millisecond
+	o.config.AgentReadyPollInterval = 20 * time.Millisecond
+
+	err := o.waitForAgentReady(context.Background(), "ws-1")
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout message, got: %v", err)
 	}
 }
