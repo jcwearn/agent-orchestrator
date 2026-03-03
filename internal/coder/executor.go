@@ -45,9 +45,12 @@ func NewExecutor(logger *slog.Logger, newCmd CommandCreator) *Executor {
 }
 
 // SSH runs a command inside a Coder workspace via `coder ssh`.
-// stdout and stderr are streamed to the provided writers in real-time.
+// The command string is passed as a single argument after "--" so the remote
+// shell receives it intact. Do NOT split into "bash", "-c", command — coder ssh
+// joins args with spaces before sending to the remote shell, which causes
+// bash -c to receive only the first word as the script.
 func (e *Executor) SSH(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*SSHResult, error) {
-	cmd := e.newCmd(ctx, "coder", "ssh", workspace, "--", "bash", "-c", command)
+	cmd := e.newCmd(ctx, "coder", "ssh", workspace, "--", command)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
