@@ -95,7 +95,7 @@ func testOrchestrator(t *testing.T, exec *mockExecutor, pool *coder.Pool) (*Orch
 	if pool == nil {
 		pool = coder.NewPool(coder.DefaultWorkspaces)
 	}
-	o := New(s, exec, pool, slog.Default(), Config{TickInterval: 50 * time.Millisecond})
+	o := New(s, exec, pool, slog.Default(), Config{TickInterval: 50 * time.Millisecond, VerifyRetryDelay: 10 * time.Millisecond})
 	return o, s
 }
 
@@ -951,11 +951,50 @@ func TestStepPlan_VerifyRepoDirFailure(t *testing.T) {
 	if updated.ErrorMessage == nil || !strings.Contains(*updated.ErrorMessage, "repo directory") {
 		t.Fatalf("expected error about repo directory, got: %v", updated.ErrorMessage)
 	}
-	// Only the verify SSH call should have been made (no Claude call).
+	if !strings.Contains(*updated.ErrorMessage, "not found after 5 attempts") {
+		t.Fatalf("expected retry exhaustion message, got: %v", updated.ErrorMessage)
+	}
+	// 5 verify retries + 1 diagnostic call, no Claude call.
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
-	if len(exec.sshCalls) != 1 {
-		t.Fatalf("expected 1 SSH call (verify only), got %d", len(exec.sshCalls))
+	if len(exec.sshCalls) != 6 {
+		t.Fatalf("expected 6 SSH calls (5 verify retries + 1 diagnostic), got %d", len(exec.sshCalls))
+	}
+}
+
+func TestStepPlan_VerifyRepoDirRetryThenSuccess(t *testing.T) {
+	exec := newMockExecutor()
+	var verifyAttempts int
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		if strings.Contains(command, "test -d") {
+			verifyAttempts++
+			if verifyAttempts < 3 {
+				return &coder.SSHResult{ExitCode: 1}, fmt.Errorf("command exited with code 1: exit status 1")
+			}
+			return &coder.SSHResult{ExitCode: 0}, nil
+		}
+		_, _ = fmt.Fprint(stdout, "the plan")
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	o, s := testOrchestrator(t, exec, nil)
+	ctx := context.Background()
+	task := createTask(t, s, "retry repo")
+
+	ws, _ := o.pool.Acquire(task.ID)
+	task.Status = StatusPlanning
+	_ = s.UpdateTask(ctx, task.ID, task)
+	o.runTask(ctx, task, ws)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusAwaitingApproval {
+		t.Fatalf("expected awaiting_approval, got %s", updated.Status)
+	}
+	// 3 verify attempts + 1 plan call.
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if len(exec.sshCalls) != 4 {
+		t.Fatalf("expected 4 SSH calls (3 verify attempts + 1 plan), got %d", len(exec.sshCalls))
 	}
 }
 

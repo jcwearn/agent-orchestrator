@@ -14,14 +14,51 @@ import (
 // verifyRepoDir checks that the expected repo directory exists in the workspace.
 // This catches cases where the Coder parameter didn't apply (stale workspace,
 // parameter mismatch, clone failure).
+//
+// Retries up to 5 times with 5s delays to handle NFS attribute caching and
+// workspace startup timing races (wait_for_rollout=false + start_blocks_login).
 func (o *Orchestrator) verifyRepoDir(ctx context.Context, workspace, repoDir string) error {
-	var stdout, stderr bytes.Buffer
-	cmd := fmt.Sprintf("test -d %s/.git", shellQuote(repoDir))
-	_, err := o.executor.SSH(ctx, workspace, cmd, &stdout, &stderr)
-	if err != nil {
-		return fmt.Errorf("repo directory %s not found in workspace: %w", repoDir, err)
+	const maxAttempts = 5
+	retryDelay := o.config.VerifyRetryDelay
+	if retryDelay == 0 {
+		retryDelay = 5 * time.Second
 	}
-	return nil
+
+	cmd := fmt.Sprintf("test -d %s/.git", shellQuote(repoDir))
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		var stdout, stderr bytes.Buffer
+		_, err := o.executor.SSH(ctx, workspace, cmd, &stdout, &stderr)
+		if err == nil {
+			if attempt > 1 {
+				o.logger.Info("verifyRepoDir succeeded after retry",
+					"workspace", workspace, "repo_dir", repoDir, "attempt", attempt)
+			}
+			return nil
+		}
+		lastErr = err
+		o.logger.Warn("verifyRepoDir attempt failed",
+			"workspace", workspace, "repo_dir", repoDir,
+			"attempt", attempt, "max_attempts", maxAttempts, "error", err)
+
+		if attempt < maxAttempts {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("repo directory %s verification cancelled: %w", repoDir, ctx.Err())
+			case <-time.After(retryDelay):
+			}
+		}
+	}
+
+	// Collect diagnostics on final failure.
+	var diagOut, diagErr bytes.Buffer
+	diagCmd := fmt.Sprintf("ls -la %s/ 2>&1 || echo 'parent dir not found'; ls -la %s/.git 2>&1 || echo '.git not found'",
+		shellQuote(path.Dir(repoDir+"/x")), shellQuote(repoDir))
+	_, _ = o.executor.SSH(ctx, workspace, diagCmd, &diagOut, &diagErr)
+
+	return fmt.Errorf("repo directory %s not found after %d attempts: %w\n\ndiagnostics:\n%s",
+		repoDir, maxAttempts, lastErr, diagOut.String())
 }
 
 // stepPlan invokes Claude CLI to produce a plan. The repo is already cloned

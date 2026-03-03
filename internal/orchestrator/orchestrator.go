@@ -21,14 +21,15 @@ type Notifier interface {
 
 // Config holds orchestrator settings.
 type Config struct {
-	TickInterval time.Duration
-	OnEvent      func(taskID, eventType string)
-	Notifier     Notifier
+	TickInterval   time.Duration
+	VerifyRetryDelay time.Duration // delay between verifyRepoDir retries (default 5s)
+	OnEvent        func(taskID, eventType string)
+	Notifier       Notifier
 }
 
 // DefaultConfig returns sensible defaults: 5-second tick interval.
 func DefaultConfig() Config {
-	return Config{TickInterval: 5 * time.Second}
+	return Config{TickInterval: 5 * time.Second, VerifyRetryDelay: 5 * time.Second}
 }
 
 // Orchestrator polls for queued tasks, assigns workspaces, and drives them
