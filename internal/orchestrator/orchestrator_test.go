@@ -250,8 +250,8 @@ func TestRunTask_PlanSuccess(t *testing.T) {
 	if strings.Contains(exec.sshCalls[1].Command, "--permission-mode plan") {
 		t.Fatalf("plan command should not contain --permission-mode plan, got: %s", exec.sshCalls[1].Command)
 	}
-	if !strings.Contains(exec.sshCalls[1].Command, "> /dev/null 2>&1") {
-		t.Fatalf("expected git checkout redirected to /dev/null, got: %s", exec.sshCalls[1].Command)
+	if strings.Contains(exec.sshCalls[1].Command, "git checkout") {
+		t.Fatalf("plan command should not contain git checkout, got: %s", exec.sshCalls[1].Command)
 	}
 	if !strings.Contains(exec.sshCalls[1].Command, "TERM=dumb claude") {
 		t.Fatalf("expected TERM=dumb before claude command, got: %s", exec.sshCalls[1].Command)

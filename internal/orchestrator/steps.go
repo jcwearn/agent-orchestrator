@@ -74,9 +74,8 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 		return err
 	}
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude --session-id %s -p %s --print",
+		"cd %s && TERM=dumb claude --session-id %s -p %s --print",
 		shellQuote(repoDir),
-		shellQuote(task.BaseBranch),
 		shellQuote(task.SessionID),
 		shellQuote(buildPlanPrompt(task)),
 	)
@@ -136,9 +135,8 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 	}
 
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude -p %s --print --allowedTools 'Bash,Edit,Write'",
+		"cd %s && TERM=dumb claude -p %s --print --allowedTools 'Bash,Edit,Write'",
 		shellQuote(repoDir),
-		shellQuote(task.BaseBranch),
 		shellQuote(buildImplementPrompt(task)),
 	)
 
@@ -289,6 +287,7 @@ func (o *Orchestrator) recoverActiveTasks(ctx context.Context) error {
 func buildPlanPrompt(task *store.Task) string {
 	return fmt.Sprintf(
 		"You are a coding agent operating in plan-only mode. You are working in the %s repository. "+
+			"The base branch for this task is %s. "+
 			"Your goal is to explore the codebase and produce an implementation plan for the task below.\n\n"+
 			"BEFORE writing the plan, use your tools to thoroughly explore the repository:\n"+
 			"- Use Glob to find relevant files and understand the project structure\n"+
@@ -314,14 +313,17 @@ func buildPlanPrompt(task *store.Task) string {
 			"Do not implement anything -- only plan.\n\n"+
 			"Task: %s",
 		repoName(task.RepoURL),
+		task.BaseBranch,
 		task.Prompt,
 	)
 }
 
 func buildImplementPrompt(task *store.Task) string {
 	prompt := fmt.Sprintf(
-		"The plan has been approved. Implement it now. "+
+		"The base branch is %s. "+
+			"The plan has been approved. Implement it now. "+
 			"Follow your git workflow rules for branching, committing, and PR creation.\n\nApproved plan:\n%s",
+		task.BaseBranch,
 		stringVal(task.Plan),
 	)
 	if task.Decisions != nil && *task.Decisions != "" {
