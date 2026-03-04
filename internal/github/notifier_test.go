@@ -168,6 +168,7 @@ type fakeGitHub struct {
 	mu       sync.Mutex
 	comments []gogithub.IssueComment
 	nextID   int64
+	prBody   string // body of the fake PR
 }
 
 func newFakeGitHub() (*httptest.Server, *fakeGitHub) {
@@ -213,6 +214,26 @@ func newFakeGitHub() (*httptest.Server, *fakeGitHub) {
 	mux.HandleFunc("PATCH /api/v3/repos/{owner}/{repo}/issues/{issue}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(gogithub.Issue{})
+	})
+
+	// Get pull request
+	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/pulls/{number}", func(w http.ResponseWriter, r *http.Request) {
+		fg.mu.Lock()
+		body := fg.prBody
+		fg.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gogithub.PullRequest{Body: gogithub.Ptr(body)})
+	})
+
+	// Edit pull request
+	mux.HandleFunc("PATCH /api/v3/repos/{owner}/{repo}/pulls/{number}", func(w http.ResponseWriter, r *http.Request) {
+		var pr gogithub.PullRequest
+		_ = json.NewDecoder(r.Body).Decode(&pr)
+		fg.mu.Lock()
+		fg.prBody = pr.GetBody()
+		fg.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(pr)
 	})
 
 	ts := httptest.NewServer(mux)
@@ -396,5 +417,75 @@ func TestCloseIssue(t *testing.T) {
 
 	if err := n.CloseIssue(ctx, "owner", "repo", 1); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLinkPRToIssue_AppendClosingRef(t *testing.T) {
+	ts, fg := newFakeGitHub()
+	defer ts.Close()
+
+	fg.prBody = "Initial PR description"
+
+	n := testNotifier(t, ts.URL)
+	ctx := context.Background()
+
+	if err := n.LinkPRToIssue(ctx, "owner", "repo", 42, 7); err != nil {
+		t.Fatal(err)
+	}
+
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	if !strings.Contains(fg.prBody, "Closes owner/repo#7") {
+		t.Errorf("expected PR body to contain closing ref, got %q", fg.prBody)
+	}
+	if !strings.HasPrefix(fg.prBody, "Initial PR description") {
+		t.Error("expected PR body to preserve original description")
+	}
+}
+
+func TestLinkPRToIssue_Idempotent(t *testing.T) {
+	ts, fg := newFakeGitHub()
+	defer ts.Close()
+
+	fg.prBody = "PR description\n\nCloses owner/repo#7"
+
+	n := testNotifier(t, ts.URL)
+	ctx := context.Background()
+
+	if err := n.LinkPRToIssue(ctx, "owner", "repo", 42, 7); err != nil {
+		t.Fatal(err)
+	}
+
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	// Body should not be modified — no duplicate closing ref.
+	if strings.Count(fg.prBody, "Closes owner/repo#7") != 1 {
+		t.Errorf("expected exactly one closing ref, got body %q", fg.prBody)
+	}
+}
+
+func TestContainsClosingKeyword(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		issueRef string
+		want     bool
+	}{
+		{"closes present", "Closes owner/repo#5", "owner/repo#5", true},
+		{"fixes present", "Fixes owner/repo#5", "owner/repo#5", true},
+		{"resolves present", "Resolves owner/repo#5", "owner/repo#5", true},
+		{"case insensitive", "closes owner/repo#5", "owner/repo#5", true},
+		{"not present", "Some PR body", "owner/repo#5", false},
+		{"different issue", "Closes owner/repo#3", "owner/repo#5", false},
+		{"empty body", "", "owner/repo#5", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containsClosingKeyword(tt.body, tt.issueRef)
+			if got != tt.want {
+				t.Errorf("containsClosingKeyword(%q, %q) = %v, want %v", tt.body, tt.issueRef, got, tt.want)
+			}
+		})
 	}
 }

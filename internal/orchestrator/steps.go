@@ -330,6 +330,12 @@ func buildImplementPrompt(task *store.Task) string {
 	if task.RunTests {
 		prompt += "\n\nIMPORTANT: Run the project's test suite before committing to verify nothing is broken."
 	}
+	if task.GithubOwner != nil && task.GithubRepo != nil && task.GithubIssue != nil {
+		prompt += fmt.Sprintf(
+			"\n\nIMPORTANT: When creating the PR with `gh pr create`, include \"Closes %s/%s#%d\" in the PR body to automatically close the associated GitHub issue.",
+			*task.GithubOwner, *task.GithubRepo, *task.GithubIssue,
+		)
+	}
 	return prompt
 }
 

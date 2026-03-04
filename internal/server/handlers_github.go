@@ -156,15 +156,22 @@ func (s *Server) handlePullRequestEvent(r *http.Request, event *gogithub.PullReq
 	repoName := repo.GetName()
 	prNumber := event.GetPullRequest().GetNumber()
 
+	s.logger.Debug("received merged PR webhook",
+		"owner", owner, "repo", repoName, "pr", prNumber)
+
 	task, err := s.store.GetTaskByPRNumber(r.Context(), owner, repoName, prNumber)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			s.logger.Debug("no task found for merged PR",
+				"owner", owner, "repo", repoName, "pr", prNumber)
 			return nil // not our PR
 		}
 		return fmt.Errorf("looking up task by PR number: %w", err)
 	}
 
 	if task.GithubIssue == nil {
+		s.logger.Debug("task has no associated GitHub issue",
+			"task_id", task.ID, "owner", owner, "repo", repoName, "pr", prNumber)
 		return nil
 	}
 

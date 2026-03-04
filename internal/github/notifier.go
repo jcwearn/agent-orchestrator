@@ -138,6 +138,42 @@ func (n *Notifier) NotifyFailed(ctx context.Context, owner, repo string, issue i
 	return n.postComment(ctx, owner, repo, issue, body)
 }
 
+// LinkPRToIssue ensures the PR body contains a "Closes owner/repo#issue" reference.
+// If the body already contains a closing keyword for the issue, it is a no-op.
+func (n *Notifier) LinkPRToIssue(ctx context.Context, owner, repo string, prNumber, issue int) error {
+	pr, _, err := n.client.PullRequests.Get(ctx, owner, repo, prNumber)
+	if err != nil {
+		return fmt.Errorf("get PR %d: %w", prNumber, err)
+	}
+
+	body := pr.GetBody()
+	closingRef := fmt.Sprintf("%s/%s#%d", owner, repo, issue)
+	if containsClosingKeyword(body, closingRef) {
+		return nil
+	}
+
+	newBody := body + fmt.Sprintf("\n\nCloses %s", closingRef)
+	_, _, err = n.client.PullRequests.Edit(ctx, owner, repo, prNumber,
+		&gogithub.PullRequest{Body: gogithub.Ptr(newBody)})
+	if err != nil {
+		return fmt.Errorf("edit PR %d body: %w", prNumber, err)
+	}
+	return nil
+}
+
+// containsClosingKeyword checks if the body already contains a closing reference
+// (e.g. "Closes owner/repo#N", "Fixes #N") for the given issue reference.
+func containsClosingKeyword(body, issueRef string) bool {
+	lower := strings.ToLower(body)
+	ref := strings.ToLower(issueRef)
+	for _, keyword := range []string{"closes", "close", "closed", "fixes", "fix", "fixed", "resolves", "resolve", "resolved"} {
+		if strings.Contains(lower, keyword+" "+ref) {
+			return true
+		}
+	}
+	return false
+}
+
 // CloseIssue closes a GitHub issue.
 func (n *Notifier) CloseIssue(ctx context.Context, owner, repo string, issue int) error {
 	state := "closed"
