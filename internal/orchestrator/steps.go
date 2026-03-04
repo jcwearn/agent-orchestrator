@@ -65,10 +65,10 @@ func (o *Orchestrator) verifyRepoDir(ctx context.Context, workspace, repoDir str
 
 // stepPlan invokes Claude CLI to produce a plan. The repo is already cloned
 // by the workspace template via the repo_url parameter.
+//
+// Retries up to PlanRetries times on empty output (transient Claude CLI issue).
+// SSH errors are not retried as they indicate infrastructure failures.
 func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace string) error {
-	stdout := o.newLogWriter(ctx, task.ID, "plan", "stdout")
-	stderr := o.newLogWriter(ctx, task.ID, "plan", "stderr")
-
 	repoDir := "/home/coder/" + repoName(task.RepoURL)
 	if err := o.verifyRepoDir(ctx, workspace, repoDir); err != nil {
 		return err
@@ -81,25 +81,47 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 		shellQuote(buildPlanPrompt(task)),
 	)
 
-	_, err := o.executor.SSH(ctx, workspace, cmd, stdout, stderr)
-	_ = stdout.Flush()
-	_ = stderr.Flush()
-
-	o.logger.Info("plan step SSH completed",
-		"task_id", task.ID,
-		"stdout_len", len(stdout.String()),
-		"stderr_len", len(stderr.String()))
-
-	if err != nil {
-		return fmt.Errorf("plan step: %w\n\nstderr tail:\n%s", err, stderr.Tail(20))
+	maxAttempts := 1 + o.config.PlanRetries
+	if maxAttempts < 1 {
+		maxAttempts = 1
 	}
 
-	plan := stdout.String()
-	if strings.TrimSpace(plan) == "" {
-		return fmt.Errorf("plan step produced empty output\n\nstderr tail:\n%s\n\nstdout tail:\n%s", stderr.Tail(20), stdout.Tail(20))
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		stdout := o.newLogWriter(ctx, task.ID, "plan", "stdout")
+		stderr := o.newLogWriter(ctx, task.ID, "plan", "stderr")
+
+		_, err := o.executor.SSH(ctx, workspace, cmd, stdout, stderr)
+		_ = stdout.Flush()
+		_ = stderr.Flush()
+
+		o.logger.Info("plan step SSH completed",
+			"task_id", task.ID,
+			"attempt", attempt,
+			"max_attempts", maxAttempts,
+			"stdout_len", len(stdout.String()),
+			"stderr_len", len(stderr.String()))
+
+		if err != nil {
+			return fmt.Errorf("plan step: %w\n\nstderr tail:\n%s", err, stderr.Tail(20))
+		}
+
+		plan := stdout.String()
+		if strings.TrimSpace(plan) != "" {
+			task.Plan = &plan
+			return nil
+		}
+
+		if attempt < maxAttempts {
+			o.logger.Warn("plan step produced empty output, retrying",
+				"task_id", task.ID, "attempt", attempt, "max_attempts", maxAttempts)
+			continue
+		}
+
+		return fmt.Errorf("plan step produced empty output after %d attempts\n\nstderr tail:\n%s\n\nstdout tail:\n%s",
+			maxAttempts, stderr.Tail(20), stdout.Tail(20))
 	}
-	task.Plan = &plan
-	return nil
+
+	return nil // unreachable
 }
 
 // stepImplement invokes Claude CLI to implement the approved plan.
