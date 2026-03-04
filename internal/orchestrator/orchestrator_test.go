@@ -1683,7 +1683,6 @@ func TestProcessApprovedTasks_RoundRobin(t *testing.T) {
 	ctx := context.Background()
 
 	// Create 3 GitHub tasks in awaiting_approval with different issue numbers.
-	var tasks []*store.Task
 	for i := 0; i < 3; i++ {
 		task := &store.Task{
 			Prompt:      fmt.Sprintf("rr-task-%d", i),
@@ -1703,7 +1702,6 @@ func TestProcessApprovedTasks_RoundRobin(t *testing.T) {
 		commentID := 42 + i
 		task.PlanCommentID = &commentID
 		_ = s.UpdateTask(ctx, task.ID, task)
-		tasks = append(tasks, task)
 		time.Sleep(10 * time.Millisecond) // ensure deterministic ordering
 	}
 
