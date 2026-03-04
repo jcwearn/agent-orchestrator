@@ -673,6 +673,15 @@ func TestStreamLogs_ActiveTask(t *testing.T) {
 	}
 }
 
+func testServerWithPool(t *testing.T, exec coder.WorkspaceExecutor, agents []string) (*Server, *store.Store) {
+	t.Helper()
+	s := testStore(t)
+	pool := coder.NewPool(agents)
+	hub := NewHub()
+	srv := New(s, pool, exec, hub, slog.Default())
+	return srv, s
+}
+
 // --- agents test ---
 
 func TestListAgents(t *testing.T) {
@@ -738,6 +747,44 @@ func TestListAgents_ExecutorError(t *testing.T) {
 	// Should still return pool slots, just without workspace status.
 	if len(agents) != 2 {
 		t.Fatalf("expected 2 agents, got %d", len(agents))
+	}
+}
+
+func TestListAgents_SortOrder(t *testing.T) {
+	exec := &mockExecutor{
+		workspaces: []coder.WorkspaceInfo{
+			{Name: "agent-1", Status: coder.WorkspaceStatusStopped},
+			{Name: "agent-2", Status: coder.WorkspaceStatusRunning},
+			{Name: "agent-3", Status: coder.WorkspaceStatusStopped},
+			{Name: "agent-4", Status: coder.WorkspaceStatusRunning},
+		},
+	}
+	srv, _ := testServerWithPool(t, exec, []string{"agent-1", "agent-2", "agent-3", "agent-4"})
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var agents []AgentInfo
+	_ = json.NewDecoder(resp.Body).Decode(&agents)
+	if len(agents) != 4 {
+		t.Fatalf("expected 4 agents, got %d", len(agents))
+	}
+
+	// Expect: running first (alphabetical), then stopped (alphabetical).
+	expected := []string{"agent-2", "agent-4", "agent-1", "agent-3"}
+	for i, name := range expected {
+		if agents[i].Name != name {
+			t.Fatalf("agents[%d]: expected %q, got %q", i, name, agents[i].Name)
+		}
 	}
 }
 

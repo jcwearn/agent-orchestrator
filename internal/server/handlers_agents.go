@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"sort"
 )
 
 type AgentInfo struct {
@@ -32,5 +33,22 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	sort.Slice(agents, func(i, j int) bool {
+		pi, pj := statusPriority(agents[i].WorkspaceStatus), statusPriority(agents[j].WorkspaceStatus)
+		if pi != pj {
+			return pi < pj
+		}
+		return agents[i].Name < agents[j].Name
+	})
+
 	writeJSON(w, http.StatusOK, agents)
+}
+
+func statusPriority(status string) int {
+	switch status {
+	case "running", "starting", "stopping":
+		return 0
+	default:
+		return 1
+	}
 }
