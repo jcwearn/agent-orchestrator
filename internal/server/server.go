@@ -59,19 +59,30 @@ func (s *Server) Routes() chi.Router {
 	r := chi.NewRouter()
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/tasks", s.handleCreateTask)
-		r.Get("/tasks", s.handleListTasks)
-		r.Get("/tasks/{id}", s.handleGetTask)
-		r.Delete("/tasks/{id}", s.handleDeleteTask)
-		r.Post("/tasks/{id}/approve", s.handleApproveTask)
-		r.Post("/tasks/{id}/feedback", s.handleFeedbackTask)
-		r.Get("/tasks/{id}/logs", s.handleStreamLogs)
+		// Public auth routes
+		r.Get("/auth/status", s.handleAuthStatus)
+		r.Post("/auth/setup", s.handleSetup)
+		r.Post("/auth/login", s.handleLogin)
+		r.Post("/auth/logout", s.handleLogout)
 
-		r.Get("/agents", s.handleListAgents)
-
+		// Webhook (has its own HMAC validation)
 		r.Post("/webhooks/github", s.handleGitHubWebhook)
 
-		r.Get("/ws", s.handleWebSocket)
+		// Protected routes
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireAuth)
+			r.Post("/tasks", s.handleCreateTask)
+			r.Get("/tasks", s.handleListTasks)
+			r.Get("/tasks/{id}", s.handleGetTask)
+			r.Delete("/tasks/{id}", s.handleDeleteTask)
+			r.Post("/tasks/{id}/approve", s.handleApproveTask)
+			r.Post("/tasks/{id}/feedback", s.handleFeedbackTask)
+			r.Get("/tasks/{id}/logs", s.handleStreamLogs)
+
+			r.Get("/agents", s.handleListAgents)
+
+			r.Get("/ws", s.handleWebSocket)
+		})
 	})
 
 	return r

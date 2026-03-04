@@ -8,7 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // --- test helpers ---
@@ -76,6 +79,30 @@ func testServerWithExecutor(t *testing.T, exec coder.WorkspaceExecutor) (*Server
 	return srv, s
 }
 
+// authenticatedClient creates a test user+session and returns an http.Client with the session cookie.
+func authenticatedClient(t *testing.T, s *store.Store, serverURL string) *http.Client {
+	t.Helper()
+	hashed, err := bcrypt.GenerateFromPassword([]byte("testpass"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := &store.User{Username: "admin", Password: string(hashed), Role: "admin"}
+	if err := s.CreateUser(context.Background(), user); err != nil {
+		t.Fatal(err)
+	}
+	sess := &store.Session{
+		UserID:    user.ID,
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}
+	if err := s.CreateSession(context.Background(), sess); err != nil {
+		t.Fatal(err)
+	}
+	jar, _ := cookiejar.New(nil)
+	u, _ := url.Parse(serverURL)
+	jar.SetCookies(u, []*http.Cookie{{Name: "session_id", Value: sess.ID}})
+	return &http.Client{Jar: jar}
+}
+
 func createTask(t *testing.T, s *store.Store, prompt string) *store.Task {
 	t.Helper()
 	task := &store.Task{
@@ -93,12 +120,13 @@ func createTask(t *testing.T, s *store.Store, prompt string) *store.Task {
 // --- task CRUD tests ---
 
 func TestCreateTask_Success(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	body := `{"prompt": "implement feature X", "repo_url": "https://github.com/test/repo"}`
-	resp, err := http.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,12 +158,13 @@ func TestCreateTask_Success(t *testing.T) {
 }
 
 func TestCreateTask_CustomBaseBranch(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	body := `{"prompt": "fix bug", "repo_url": "https://github.com/test/repo", "base_branch": "develop"}`
-	resp, err := http.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,12 +182,13 @@ func TestCreateTask_CustomBaseBranch(t *testing.T) {
 }
 
 func TestCreateTask_MissingPrompt(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	body := `{"repo_url": "https://github.com/test/repo"}`
-	resp, err := http.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,12 +200,13 @@ func TestCreateTask_MissingPrompt(t *testing.T) {
 }
 
 func TestCreateTask_MissingRepoURL(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	body := `{"prompt": "do something"}`
-	resp, err := http.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,11 +218,12 @@ func TestCreateTask_MissingRepoURL(t *testing.T) {
 }
 
 func TestListTasks_Empty(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
-	resp, err := http.Get(ts.URL + "/api/v1/tasks")
+	resp, err := client.Get(ts.URL + "/api/v1/tasks")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,11 +244,12 @@ func TestListTasks_All(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	createTask(t, s, "task-1")
 	createTask(t, s, "task-2")
 
-	resp, err := http.Get(ts.URL + "/api/v1/tasks")
+	resp, err := client.Get(ts.URL + "/api/v1/tasks")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,13 +266,14 @@ func TestListTasks_Filtered(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	createTask(t, s, "task-1")
 	task2 := createTask(t, s, "task-2")
 	task2.Status = "planning"
 	_ = s.UpdateTask(context.Background(), task2.ID, task2)
 
-	resp, err := http.Get(ts.URL + "/api/v1/tasks?status=queued")
+	resp, err := client.Get(ts.URL + "/api/v1/tasks?status=queued")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,10 +290,11 @@ func TestGetTask_Success(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "get me")
 
-	resp, err := http.Get(ts.URL + "/api/v1/tasks/" + task.ID)
+	resp, err := client.Get(ts.URL + "/api/v1/tasks/" + task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,11 +312,12 @@ func TestGetTask_Success(t *testing.T) {
 }
 
 func TestGetTask_NotFound(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
-	resp, err := http.Get(ts.URL + "/api/v1/tasks/nonexistent")
+	resp, err := client.Get(ts.URL + "/api/v1/tasks/nonexistent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,11 +332,12 @@ func TestDeleteTask_Success(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "delete me")
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/tasks/"+task.ID, nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,12 +349,13 @@ func TestDeleteTask_Success(t *testing.T) {
 }
 
 func TestDeleteTask_NotFound(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/tasks/nonexistent", nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,6 +372,7 @@ func TestApproveTask_Success(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "approve me")
 	task.Status = "awaiting_approval"
@@ -341,7 +380,7 @@ func TestApproveTask_Success(t *testing.T) {
 	task.Plan = &plan
 	_ = s.UpdateTask(context.Background(), task.ID, task)
 
-	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", nil)
+	resp, err := client.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,10 +401,11 @@ func TestApproveTask_WrongStatus(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "not ready")
 
-	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", nil)
+	resp, err := client.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,11 +417,12 @@ func TestApproveTask_WrongStatus(t *testing.T) {
 }
 
 func TestApproveTask_NotFound(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
-	resp, err := http.Post(ts.URL+"/api/v1/tasks/nonexistent/approve", "application/json", nil)
+	resp, err := client.Post(ts.URL+"/api/v1/tasks/nonexistent/approve", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,6 +437,7 @@ func TestApproveTask_WithRunTestsAndDecisions(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "approve with options")
 	task.Status = "awaiting_approval"
@@ -404,7 +446,7 @@ func TestApproveTask_WithRunTestsAndDecisions(t *testing.T) {
 	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	body := `{"run_tests": true, "decisions": "- [x] PostgreSQL -- mature"}`
-	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", strings.NewReader(body))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,12 +473,13 @@ func TestApproveTask_EmptyBody(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "approve empty body")
 	task.Status = "awaiting_approval"
 	_ = s.UpdateTask(context.Background(), task.ID, task)
 
-	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", nil)
+	resp, err := client.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,6 +505,7 @@ func TestFeedbackTask_Success(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "feedback me")
 	task.Status = "awaiting_approval"
@@ -470,7 +514,7 @@ func TestFeedbackTask_Success(t *testing.T) {
 	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	body := `{"feedback": "please add error handling"}`
-	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,13 +538,14 @@ func TestFeedbackTask_EmptyFeedback(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "feedback me")
 	task.Status = "awaiting_approval"
 	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	body := `{"feedback": ""}`
-	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,6 +560,7 @@ func TestFeedbackTask_WithDecisions(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "feedback with decisions")
 	task.Status = "awaiting_approval"
@@ -523,7 +569,7 @@ func TestFeedbackTask_WithDecisions(t *testing.T) {
 	_ = s.UpdateTask(context.Background(), task.ID, task)
 
 	body := `{"feedback": "use PostgreSQL", "decisions": "- [x] PostgreSQL -- mature"}`
-	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,11 +596,12 @@ func TestFeedbackTask_WrongStatus(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "not ready")
 
 	body := `{"feedback": "some feedback"}`
-	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,6 +618,7 @@ func TestStreamLogs(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "log task")
 	task.Status = "complete"
@@ -583,7 +631,7 @@ func TestStreamLogs(t *testing.T) {
 		})
 	}
 
-	resp, err := http.Get(ts.URL + "/api/v1/tasks/" + task.ID + "/logs")
+	resp, err := client.Get(ts.URL + "/api/v1/tasks/" + task.ID + "/logs")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,11 +659,12 @@ func TestStreamLogs(t *testing.T) {
 }
 
 func TestStreamLogs_NotFound(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
-	resp, err := http.Get(ts.URL + "/api/v1/tasks/nonexistent/logs")
+	resp, err := client.Get(ts.URL + "/api/v1/tasks/nonexistent/logs")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,6 +679,7 @@ func TestStreamLogs_ActiveTask(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
 	task := createTask(t, s, "active task")
 	task.Status = "planning"
@@ -645,7 +695,7 @@ func TestStreamLogs_ActiveTask(t *testing.T) {
 	defer cancel()
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/tasks/"+task.ID+"/logs", nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -691,11 +741,12 @@ func TestListAgents(t *testing.T) {
 			{Name: "agent-2", Status: coder.WorkspaceStatusStopped},
 		},
 	}
-	srv, _ := testServerWithExecutor(t, exec)
+	srv, s := testServerWithExecutor(t, exec)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
-	resp, err := http.Get(ts.URL + "/api/v1/agents")
+	resp, err := client.Get(ts.URL + "/api/v1/agents")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,11 +779,12 @@ func TestListAgents_ExecutorError(t *testing.T) {
 	exec := &mockExecutor{
 		err: io.ErrUnexpectedEOF,
 	}
-	srv, _ := testServerWithExecutor(t, exec)
+	srv, s := testServerWithExecutor(t, exec)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
-	resp, err := http.Get(ts.URL + "/api/v1/agents")
+	resp, err := client.Get(ts.URL + "/api/v1/agents")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -759,11 +811,12 @@ func TestListAgents_SortOrder(t *testing.T) {
 			{Name: "agent-4", Status: coder.WorkspaceStatusRunning},
 		},
 	}
-	srv, _ := testServerWithPool(t, exec, []string{"agent-1", "agent-2", "agent-3", "agent-4"})
+	srv, s := testServerWithPool(t, exec, []string{"agent-1", "agent-2", "agent-3", "agent-4"})
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
-	resp, err := http.Get(ts.URL + "/api/v1/agents")
+	resp, err := client.Get(ts.URL + "/api/v1/agents")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -850,12 +903,21 @@ func TestHub_BroadcastNoConnections(t *testing.T) {
 // --- websocket handler test ---
 
 func TestWebSocket_Handler(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
 
+	// Create auth session for websocket cookie header.
+	hashed, _ := bcrypt.GenerateFromPassword([]byte("testpass"), bcrypt.MinCost)
+	user := &store.User{Username: "wsadmin", Password: string(hashed), Role: "admin"}
+	_ = s.CreateUser(context.Background(), user)
+	sess := &store.Session{UserID: user.ID, ExpiresAt: time.Now().UTC().Add(time.Hour)}
+	_ = s.CreateSession(context.Background(), sess)
+
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	header := http.Header{}
+	header.Set("Cookie", "session_id="+sess.ID)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -884,11 +946,12 @@ func TestWebSocket_Handler(t *testing.T) {
 // --- JSON response tests ---
 
 func TestCreateTask_InvalidJSON(t *testing.T) {
-	srv, _ := testServer(t)
+	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
 
-	resp, err := http.Post(ts.URL+"/api/v1/tasks", "application/json", bytes.NewReader([]byte("not json")))
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", bytes.NewReader([]byte("not json")))
 	if err != nil {
 		t.Fatal(err)
 	}

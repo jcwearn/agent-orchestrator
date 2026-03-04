@@ -51,3 +51,25 @@ export interface CreateTaskRequest {
   repo_url: string
   base_branch: string
 }
+
+export interface AuthUser {
+  id: string
+  username: string
+  role: string
+}
+
+export interface AuthStatus {
+  setup_required: boolean
+  authenticated: boolean
+  user: AuthUser | null
+}
+
+export interface LoginRequest {
+  username: string
+  password: string
+}
+
+export interface SetupRequest {
+  username: string
+  password: string
+}

@@ -37,3 +37,18 @@ type TaskLog struct {
 	Line      string    `json:"line"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type User struct {
+	ID        string    `json:"id"`
+	Username  string    `json:"username"`
+	Password  string    `json:"-"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Session struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
