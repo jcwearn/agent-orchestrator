@@ -4,18 +4,11 @@ import (
 	"context"
 	"net/http"
 	"time"
-
-	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
 type contextKey string
 
 const userContextKey contextKey = "user"
-
-func UserFromContext(ctx context.Context) *store.User {
-	u, _ := ctx.Value(userContextKey).(*store.User)
-	return u
-}
 
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

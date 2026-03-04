@@ -17,8 +17,8 @@ export function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/setup" element={<Setup />} />
-        <Route path="/login" element={<Login />} />
+        <Route path="/setup" element={<Setup onSetup={auth.setup} />} />
+        <Route path="/login" element={<Login onLogin={auth.login} />} />
         <Route
           element={
             <AuthGuard

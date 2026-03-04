@@ -10,9 +10,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { setup } from "@/api/client"
+interface SetupProps {
+  onSetup: (username: string, password: string) => Promise<void>
+}
 
-export function Setup() {
+export function Setup({ onSetup }: SetupProps) {
   const navigate = useNavigate()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -35,7 +37,7 @@ export function Setup() {
 
     setLoading(true)
     try {
-      await setup({ username, password })
+      await onSetup(username, password)
       navigate("/")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Setup failed")

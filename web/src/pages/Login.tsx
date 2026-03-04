@@ -9,9 +9,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { login } from "@/api/client"
+interface LoginProps {
+  onLogin: (username: string, password: string) => Promise<void>
+}
 
-export function Login() {
+export function Login({ onLogin }: LoginProps) {
   const navigate = useNavigate()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -24,7 +26,7 @@ export function Login() {
     setLoading(true)
 
     try {
-      await login({ username, password })
+      await onLogin(username, password)
       navigate("/")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed")
