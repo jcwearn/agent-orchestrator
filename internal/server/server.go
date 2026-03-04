@@ -80,6 +80,7 @@ func (s *Server) Routes() chi.Router {
 			r.Get("/tasks/{id}/logs", s.handleStreamLogs)
 
 			r.Get("/agents", s.handleListAgents)
+			r.Get("/repositories", s.handleListRepos)
 
 			r.Get("/ws", s.handleWebSocket)
 		})

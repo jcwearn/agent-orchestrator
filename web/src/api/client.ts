@@ -4,6 +4,7 @@ import type {
   ConfigResponse,
   CreateTaskRequest,
   LoginRequest,
+  RepoInfo,
   SetupRequest,
   Task,
 } from "@/types/api"
@@ -101,4 +102,8 @@ export function sendFeedback(
 
 export function listAgents(): Promise<AgentInfo[]> {
   return request<AgentInfo[]>("/agents")
+}
+
+export function listRepositories(): Promise<RepoInfo[]> {
+  return request<RepoInfo[]>("/repositories")
 }
