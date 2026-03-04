@@ -53,7 +53,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	task := &store.Task{
 		Prompt:     req.Prompt,
-		RepoURL:    req.RepoURL,
+		RepoURL:    strings.TrimSuffix(req.RepoURL, ".git"),
 		BaseBranch: req.BaseBranch,
 		SourceType: "api",
 		SessionID:  uuid.New().String(),
