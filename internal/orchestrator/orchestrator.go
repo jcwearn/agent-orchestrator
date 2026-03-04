@@ -152,7 +152,8 @@ func (o *Orchestrator) launchPlanTask(ctx context.Context, task *store.Task) err
 		return nil // no free workspace, try next tick
 	}
 
-	// Clear feedback so the task isn't picked up again as a replan.
+	// Save feedback for the prompt, then clear it in the store to prevent re-pickup.
+	savedFeedback := task.PlanFeedback
 	task.PlanFeedback = nil
 
 	// Mark as planning synchronously before launching the goroutine so the
@@ -166,6 +167,9 @@ func (o *Orchestrator) launchPlanTask(ctx context.Context, task *store.Task) err
 		return fmt.Errorf("mark task planning: %w", err)
 	}
 	o.publishEvent(task.ID, "task.updated")
+
+	// Restore feedback on in-memory struct so buildPlanPrompt can read it.
+	task.PlanFeedback = savedFeedback
 
 	// For GitHub replan tasks, post acknowledgment comment.
 	if o.isGitHubTask(task) && task.PlanRevision > 0 {
@@ -224,7 +228,8 @@ func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
 
 		if needsReplan(t) {
 			continue // handled by tick() via nextReplanTask()
-		} else if isApproved(t) {
+		}
+		if isApproved(t) {
 			approved = append(approved, t)
 		} else if o.isGitHubTask(t) && t.PlanCommentID != nil {
 			needsCheck = append(needsCheck, t)
@@ -341,6 +346,9 @@ func (o *Orchestrator) runTask(ctx context.Context, task *store.Task, workspace 
 		o.failTask(ctx, task, workspace, err)
 		return
 	}
+
+	// Clear feedback after prompt has been built so it isn't persisted again.
+	task.PlanFeedback = nil
 
 	// For GitHub tasks, post plan as issue comment.
 	if o.isGitHubTask(task) && task.Plan != nil {

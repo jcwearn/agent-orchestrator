@@ -1886,6 +1886,20 @@ func TestTick_PicksUpReplanTask(t *testing.T) {
 	if revCalls != 1 {
 		t.Errorf("expected 1 NotifyPlanRevisionStarted call, got %d", revCalls)
 	}
+
+	// Verify the executor received an SSH command containing the feedback text.
+	exec.mu.Lock()
+	var foundFeedback bool
+	for _, call := range exec.sshCalls {
+		if strings.Contains(call.Command, "needs more detail") {
+			foundFeedback = true
+			break
+		}
+	}
+	exec.mu.Unlock()
+	if !foundFeedback {
+		t.Error("expected SSH command to contain feedback text 'needs more detail'")
+	}
 }
 
 func TestProcessApprovedTasks_SkipsReplanTasks(t *testing.T) {
