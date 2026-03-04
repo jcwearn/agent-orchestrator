@@ -114,7 +114,7 @@ func (o *Orchestrator) stepImplement(ctx context.Context, task *store.Task, work
 	}
 
 	cmd := fmt.Sprintf(
-		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude -p %s --print",
+		"cd %s && git checkout %s > /dev/null 2>&1 && TERM=dumb claude -p %s --print --allowedTools 'Bash,Edit,Write'",
 		shellQuote(repoDir),
 		shellQuote(task.BaseBranch),
 		shellQuote(buildImplementPrompt(task)),
