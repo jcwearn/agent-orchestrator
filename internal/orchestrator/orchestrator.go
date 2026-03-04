@@ -355,6 +355,14 @@ func (o *Orchestrator) runImplement(ctx context.Context, task *store.Task, works
 		return
 	}
 
+	// Check if task was cancelled while implementing.
+	latest, err := o.store.GetTask(ctx, task.ID)
+	if err == nil && latest.Status == StatusCancelled {
+		o.logger.Info("task cancelled during implementation", "task_id", task.ID)
+		o.stopAndRelease(ctx, workspace)
+		return
+	}
+
 	// For GitHub tasks, ensure the PR body links to the issue for auto-close on merge.
 	if o.isGitHubTask(task) && task.PRNumber != nil {
 		if err := o.config.Notifier.LinkPRToIssue(ctx, *task.GithubOwner, *task.GithubRepo, *task.PRNumber, *task.GithubIssue); err != nil {

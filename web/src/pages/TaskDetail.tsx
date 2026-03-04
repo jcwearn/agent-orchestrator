@@ -76,7 +76,7 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
             {task.workspace_id && <span>Workspace: {task.workspace_id}</span>}
           </div>
         </div>
-        {["queued", "planning", "awaiting_approval"].includes(task.status) && (
+        {["queued", "planning", "awaiting_approval", "implementing"].includes(task.status) && (
           <Button
             variant="destructive"
             size="sm"

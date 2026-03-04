@@ -1729,3 +1729,40 @@ func TestProcessApprovedTasks_RoundRobin(t *testing.T) {
 		t.Fatalf("expected 3 unique check calls, got %d unique: %v", len(seen), notifier.checkCalls)
 	}
 }
+
+func TestRunImplement_CancelledDuringImplementation(t *testing.T) {
+	exec := newMockExecutor()
+	o, s := testOrchestrator(t, exec, nil)
+	ctx := context.Background()
+
+	task := createTask(t, s, "cancel during implement")
+	task.Status = StatusImplementing
+	task.Plan = strPtr("the plan")
+	task.PlanFeedback = strPtr("approved")
+	_ = s.UpdateTask(ctx, task.ID, task)
+
+	// Simulate cancellation during stepImplement: when the SSH command runs,
+	// cancel the task in the store before returning.
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		if strings.Contains(command, "test -d") {
+			return &coder.SSHResult{ExitCode: 0}, nil
+		}
+		// Cancel the task while "implementing".
+		task.Status = StatusCancelled
+		now := time.Now().UTC()
+		task.CompletedAt = &now
+		_ = s.UpdateTask(ctx, task.ID, task)
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	ws, _ := o.pool.Acquire(task.ID)
+	o.runImplement(ctx, task, ws)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusCancelled {
+		t.Fatalf("expected cancelled, got %s", updated.Status)
+	}
+	if o.pool.FreeCount() != len(coder.DefaultWorkspaces) {
+		t.Fatal("workspace not released")
+	}
+}
