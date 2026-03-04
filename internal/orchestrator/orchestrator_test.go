@@ -344,6 +344,9 @@ func TestRunImplement_Success(t *testing.T) {
 	if strings.Contains(exec.sshCalls[1].Command, "--permission-mode plan") {
 		t.Fatalf("implement command should not contain --permission-mode plan, got: %s", exec.sshCalls[1].Command)
 	}
+	if !strings.Contains(exec.sshCalls[1].Command, "--allowedTools") {
+		t.Fatalf("implement command should contain --allowedTools flag, got: %s", exec.sshCalls[1].Command)
+	}
 }
 
 func TestRunImplement_Failure(t *testing.T) {
