@@ -38,14 +38,24 @@ export function deleteTask(id: string): Promise<void> {
   return request<void>(`/tasks/${id}`, { method: "DELETE" })
 }
 
-export function approveTask(id: string): Promise<Task> {
-  return request<Task>(`/tasks/${id}/approve`, { method: "POST" })
+export function approveTask(
+  id: string,
+  opts?: { run_tests?: boolean; decisions?: string },
+): Promise<Task> {
+  return request<Task>(`/tasks/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify(opts ?? {}),
+  })
 }
 
-export function sendFeedback(id: string, feedback: string): Promise<Task> {
+export function sendFeedback(
+  id: string,
+  feedback: string,
+  decisions?: string,
+): Promise<Task> {
   return request<Task>(`/tasks/${id}/feedback`, {
     method: "POST",
-    body: JSON.stringify({ feedback }),
+    body: JSON.stringify({ feedback, decisions }),
   })
 }
 

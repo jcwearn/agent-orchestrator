@@ -96,7 +96,7 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
       )}
 
       {task.status === "awaiting_approval" && (
-        <ApprovalForm taskId={task.id} onAction={fetchTask} />
+        <ApprovalForm taskId={task.id} plan={task.plan} onAction={fetchTask} />
       )}
 
       <PlanView plan={task.plan} revision={task.plan_revision} />
