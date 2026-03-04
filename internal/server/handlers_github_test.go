@@ -752,6 +752,76 @@ func TestGitHubWebhook_EmptyAllowedUsers_AllowsAll(t *testing.T) {
 	}
 }
 
+func TestGitHubWebhook_DedupWithAPICreatedTask(t *testing.T) {
+	ghServer := httptest.NewServer(http.NewServeMux())
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHub(t, ghServer.URL)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	// Pre-create an API task with GitHub metadata (as if created via UI with create_issue).
+	owner := "testowner"
+	repo := "testrepo"
+	issueNum := 50
+	task := &store.Task{
+		Prompt:      "Do something",
+		RepoURL:     "https://github.com/testowner/testrepo",
+		SourceType:  "api",
+		GithubOwner: &owner,
+		GithubRepo:  &repo,
+		GithubIssue: &issueNum,
+		SessionID:   "sess-api",
+	}
+	if err := s.CreateTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now simulate a webhook for the same issue.
+	event := gogithub.IssuesEvent{
+		Action: gogithub.Ptr("labeled"),
+		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Issue: &gogithub.Issue{
+			Number: gogithub.Ptr(50),
+			Title:  gogithub.Ptr("Do something"),
+		},
+		Repo: &gogithub.Repository{
+			Name:     gogithub.Ptr("testrepo"),
+			CloneURL: gogithub.Ptr("https://github.com/testowner/testrepo.git"),
+			Owner:    &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload, _ := json.Marshal(event)
+	signature := signPayload(payload, testWebhookSecret)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	req.Header.Set("X-GitHub-Event", "issues")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// Verify no duplicate task was created.
+	tasks, err := s.ListTasks(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task (dedup with API-created), got %d", len(tasks))
+	}
+	if tasks[0].SourceType != "api" {
+		t.Fatalf("expected original API task, got source_type %q", tasks[0].SourceType)
+	}
+}
+
 func TestGitHubWebhook_IssuesOpened_WithoutAITaskLabel(t *testing.T) {
 	ghServer := httptest.NewServer(http.NewServeMux())
 	defer ghServer.Close()

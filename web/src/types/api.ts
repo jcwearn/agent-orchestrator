@@ -50,6 +50,11 @@ export interface CreateTaskRequest {
   prompt: string
   repo_url: string
   base_branch: string
+  create_issue?: boolean
+}
+
+export interface ConfigResponse {
+  github_configured: boolean
 }
 
 export interface AuthUser {

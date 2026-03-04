@@ -221,9 +221,9 @@ func (o *Orchestrator) publishEvent(taskID, eventType string) {
 	}
 }
 
-// isGitHubTask returns true if the task originated from GitHub and a notifier is configured.
+// isGitHubTask returns true if the task has GitHub metadata and a notifier is configured.
 func (o *Orchestrator) isGitHubTask(task *store.Task) bool {
-	return o.config.Notifier != nil && task.SourceType == "github" &&
+	return o.config.Notifier != nil &&
 		task.GithubOwner != nil && task.GithubRepo != nil && task.GithubIssue != nil
 }
 
