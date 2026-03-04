@@ -285,7 +285,7 @@ func (o *Orchestrator) recoverActiveTasks(ctx context.Context) error {
 }
 
 func buildPlanPrompt(task *store.Task) string {
-	return fmt.Sprintf(
+	prompt := fmt.Sprintf(
 		"You are a coding agent operating in plan-only mode. You are working in the %s repository. "+
 			"The base branch for this task is %s. "+
 			"Your goal is to explore the codebase and produce an implementation plan for the task below.\n\n"+
@@ -316,6 +316,18 @@ func buildPlanPrompt(task *store.Task) string {
 		task.BaseBranch,
 		task.Prompt,
 	)
+
+	if task.PlanRevision > 0 && task.Plan != nil {
+		prompt += fmt.Sprintf(
+			"\n\nPrevious plan:\n%s\n\nReviewer feedback (revision %d):\n%s\n\n"+
+				"Revise the plan to address this feedback.",
+			*task.Plan,
+			task.PlanRevision,
+			stringVal(task.PlanFeedback),
+		)
+	}
+
+	return prompt
 }
 
 func buildImplementPrompt(task *store.Task) string {

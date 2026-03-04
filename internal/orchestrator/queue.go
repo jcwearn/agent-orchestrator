@@ -69,3 +69,11 @@ func (o *Orchestrator) activeTasks(ctx context.Context) ([]store.Task, error) {
 func isApproved(task *store.Task) bool {
 	return task.PlanFeedback != nil && *task.PlanFeedback == "approved"
 }
+
+// needsReplan returns true if the task has non-empty, non-approved feedback
+// that requires re-running the plan agent.
+func needsReplan(task *store.Task) bool {
+	return task.PlanFeedback != nil &&
+		*task.PlanFeedback != "approved" &&
+		*task.PlanFeedback != ""
+}
