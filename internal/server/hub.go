@@ -11,6 +11,7 @@ type Event struct {
 	Type   string `json:"type"`
 	TaskID string `json:"task_id"`
 	Data   any    `json:"data,omitempty"`
+	Agents any    `json:"agents,omitempty"`
 }
 
 type Hub struct {

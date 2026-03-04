@@ -23,11 +23,21 @@ export function useAgents(subscribe: (fn: (e: WSEvent) => void) => () => void) {
 
   useEffect(() => {
     return subscribe((event: WSEvent) => {
-      if (event.type.startsWith("task.")) {
+      if (event.type === "agent.updated" && event.agents) {
+        setAgents(event.agents)
+      } else if (event.type === "agent.updated") {
+        fetchAgents()
+      } else if (event.type.startsWith("task.")) {
         fetchAgents()
       }
     })
   }, [subscribe, fetchAgents])
+
+  // Poll every 30s to catch workspace changes from outside the orchestrator.
+  useEffect(() => {
+    const id = setInterval(fetchAgents, 30_000)
+    return () => clearInterval(id)
+  }, [fetchAgents])
 
   return { agents, loading }
 }
