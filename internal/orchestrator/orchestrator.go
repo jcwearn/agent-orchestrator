@@ -25,6 +25,7 @@ type Notifier interface {
 	NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error
 	NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error
 	NotifyFailed(ctx context.Context, owner, repo string, issue int, reason string) error
+	LinkPRToIssue(ctx context.Context, owner, repo string, prNumber, issue int) error
 }
 
 // Config holds orchestrator settings.
@@ -297,6 +298,13 @@ func (o *Orchestrator) runImplement(ctx context.Context, task *store.Task, works
 	if err := o.stepImplement(ctx, task, workspace); err != nil {
 		o.failTask(ctx, task, workspace, err)
 		return
+	}
+
+	// For GitHub tasks, ensure the PR body links to the issue for auto-close on merge.
+	if o.isGitHubTask(task) && task.PRNumber != nil {
+		if err := o.config.Notifier.LinkPRToIssue(ctx, *task.GithubOwner, *task.GithubRepo, *task.PRNumber, *task.GithubIssue); err != nil {
+			o.logger.Error("link PR to issue", "task_id", task.ID, "error", err)
+		}
 	}
 
 	task.Status = StatusComplete

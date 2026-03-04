@@ -209,3 +209,7 @@ func (a *notifierAdapter) NotifyComplete(ctx context.Context, owner, repo string
 func (a *notifierAdapter) NotifyFailed(ctx context.Context, owner, repo string, issue int, reason string) error {
 	return a.notifier.NotifyFailed(ctx, owner, repo, issue, reason)
 }
+
+func (a *notifierAdapter) LinkPRToIssue(ctx context.Context, owner, repo string, prNumber, issue int) error {
+	return a.notifier.LinkPRToIssue(ctx, owner, repo, prNumber, issue)
+}

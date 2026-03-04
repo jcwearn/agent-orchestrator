@@ -614,6 +614,7 @@ type mockNotifier struct {
 	implStartedCalls        []string
 	completeCalls           []string
 	failedCalls             []string
+	linkPRCalls             []string
 	planReadyResult         int64
 	checkResult             ApprovalResult
 }
@@ -654,6 +655,13 @@ func (m *mockNotifier) NotifyFailed(ctx context.Context, owner, repo string, iss
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.failedCalls = append(m.failedCalls, fmt.Sprintf("%s/%s#%d: %s", owner, repo, issue, reason))
+	return nil
+}
+
+func (m *mockNotifier) LinkPRToIssue(ctx context.Context, owner, repo string, prNumber, issue int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.linkPRCalls = append(m.linkPRCalls, fmt.Sprintf("%s/%s#%d->%d", owner, repo, prNumber, issue))
 	return nil
 }
 
@@ -1220,6 +1228,39 @@ func TestRunImplement_CapturesPRUrl(t *testing.T) {
 	}
 }
 
+func TestRunImplement_LinkPRToIssue(t *testing.T) {
+	exec := newMockExecutor()
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		if !strings.Contains(command, "test -d") {
+			_, _ = fmt.Fprint(stdout, "https://github.com/test/repo/pull/55\n")
+		}
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	notifier := newMockNotifier()
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "link pr test")
+	task.Status = StatusImplementing
+	task.Plan = strPtr("the plan")
+	task.PlanFeedback = strPtr("approved")
+	_ = s.UpdateTask(ctx, task.ID, task)
+
+	ws, _ := o.pool.Acquire(task.ID)
+	o.runImplement(ctx, task, ws)
+
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.linkPRCalls) != 1 {
+		t.Fatalf("expected 1 linkPR call, got %d", len(notifier.linkPRCalls))
+	}
+	if notifier.linkPRCalls[0] != "test/repo#55->1" {
+		t.Fatalf("unexpected linkPR call: %s", notifier.linkPRCalls[0])
+	}
+}
+
 func TestProcessApprovedTasks_GitHubNotifyImplementationStarted(t *testing.T) {
 	exec := newMockExecutor()
 	notifier := newMockNotifier()
@@ -1291,6 +1332,32 @@ func TestBuildImplementPrompt_WithDecisions(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "PostgreSQL") {
 		t.Fatalf("expected decisions content, got: %s", prompt)
+	}
+}
+
+func TestBuildImplementPrompt_GitHubIssueClosingRef(t *testing.T) {
+	owner := "myorg"
+	repo := "myrepo"
+	issue := 42
+	task := &store.Task{
+		Plan:        strPtr("the plan"),
+		GithubOwner: &owner,
+		GithubRepo:  &repo,
+		GithubIssue: &issue,
+	}
+	prompt := buildImplementPrompt(task)
+	if !strings.Contains(prompt, `Closes myorg/myrepo#42`) {
+		t.Fatalf("expected closing ref in prompt, got: %s", prompt)
+	}
+}
+
+func TestBuildImplementPrompt_NoGitHubIssue(t *testing.T) {
+	task := &store.Task{
+		Plan: strPtr("the plan"),
+	}
+	prompt := buildImplementPrompt(task)
+	if strings.Contains(prompt, "Closes") {
+		t.Fatalf("should not contain closing ref for non-GitHub task, got: %s", prompt)
 	}
 }
 
