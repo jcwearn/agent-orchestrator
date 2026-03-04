@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	gogithub "github.com/google/go-github/v83/github"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
@@ -617,6 +619,7 @@ type mockNotifier struct {
 	linkPRCalls             []string
 	planReadyResult         int64
 	checkResult             ApprovalResult
+	checkErr                error
 }
 
 func newMockNotifier() *mockNotifier {
@@ -634,6 +637,9 @@ func (m *mockNotifier) CheckApproval(ctx context.Context, owner, repo string, is
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.checkCalls = append(m.checkCalls, fmt.Sprintf("%s/%s#%d@%d", owner, repo, issue, commentID))
+	if m.checkErr != nil {
+		return ApprovalResult{}, m.checkErr
+	}
 	return m.checkResult, nil
 }
 
@@ -1569,5 +1575,157 @@ func TestIsGitHubTask_NoNotifier(t *testing.T) {
 
 	if o.isGitHubTask(task) {
 		t.Fatal("expected isGitHubTask to return false when notifier is nil")
+	}
+}
+
+func TestProcessApprovedTasks_RateLimitBackoff(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	resetTime := time.Now().Add(30 * time.Second)
+	notifier.checkErr = &gogithub.RateLimitError{
+		Rate: gogithub.Rate{
+			Reset: gogithub.Timestamp{Time: resetTime},
+		},
+		Response: &http.Response{StatusCode: 403},
+		Message:  "API rate limit exceeded",
+	}
+
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "rate limited")
+	task.Status = StatusAwaitingApproval
+	task.Plan = strPtr("the plan")
+	commentID := 42
+	task.PlanCommentID = &commentID
+	_ = s.UpdateTask(ctx, task.ID, task)
+
+	// First call triggers rate limit.
+	if err := o.processApprovedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	notifier.mu.Lock()
+	if len(notifier.checkCalls) != 1 {
+		t.Fatalf("expected 1 check call on first tick, got %d", len(notifier.checkCalls))
+	}
+	notifier.mu.Unlock()
+
+	// Second call should be skipped due to backoff.
+	if err := o.processApprovedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	notifier.mu.Lock()
+	if len(notifier.checkCalls) != 1 {
+		t.Fatalf("expected still 1 check call after backoff, got %d", len(notifier.checkCalls))
+	}
+	notifier.mu.Unlock()
+
+	// Task should still be awaiting approval.
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusAwaitingApproval {
+		t.Fatalf("expected awaiting_approval, got %s", updated.Status)
+	}
+}
+
+func TestProcessApprovedTasks_StaleTaskExpiry(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	o.config.ApprovalTimeout = 1 * time.Millisecond // very short for testing
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "stale task")
+	task.Status = StatusAwaitingApproval
+	task.Plan = strPtr("the plan")
+	commentID := 42
+	task.PlanCommentID = &commentID
+	_ = s.UpdateTask(ctx, task.ID, task)
+
+	// Wait to ensure the task is older than the timeout.
+	time.Sleep(5 * time.Millisecond)
+
+	if err := o.processApprovedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusCancelled {
+		t.Fatalf("expected cancelled, got %s", updated.Status)
+	}
+	if updated.CompletedAt == nil {
+		t.Fatal("expected completed_at to be set")
+	}
+	if updated.ErrorMessage == nil || !strings.Contains(*updated.ErrorMessage, "approval timeout") {
+		t.Fatalf("expected timeout error message, got %v", updated.ErrorMessage)
+	}
+
+	// Should have notified GitHub about expiry.
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.failedCalls) != 1 {
+		t.Fatalf("expected 1 failed call for expiry notification, got %d", len(notifier.failedCalls))
+	}
+}
+
+func TestProcessApprovedTasks_RoundRobin(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	// CheckApproval returns not approved, no feedback — just pending.
+	notifier.checkResult = ApprovalResult{}
+
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	// Create 3 GitHub tasks in awaiting_approval with different issue numbers.
+	var tasks []*store.Task
+	for i := 0; i < 3; i++ {
+		task := &store.Task{
+			Prompt:      fmt.Sprintf("rr-task-%d", i),
+			RepoURL:     "https://github.com/test/repo.git",
+			BaseBranch:  "main",
+			SourceType:  "github",
+			GithubOwner: strPtr("test"),
+			GithubRepo:  strPtr("repo"),
+			GithubIssue: intPtr(100 + i),
+			SessionID:   fmt.Sprintf("session-rr-%d", i),
+		}
+		if err := s.CreateTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		task.Status = StatusAwaitingApproval
+		task.Plan = strPtr("the plan")
+		commentID := 42 + i
+		task.PlanCommentID = &commentID
+		_ = s.UpdateTask(ctx, task.ID, task)
+		tasks = append(tasks, task)
+		time.Sleep(10 * time.Millisecond) // ensure deterministic ordering
+	}
+
+	// 3 ticks should check 3 different tasks (one per tick).
+	for i := 0; i < 3; i++ {
+		if err := o.processApprovedTasks(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.checkCalls) != 3 {
+		t.Fatalf("expected 3 check calls (one per tick), got %d", len(notifier.checkCalls))
+	}
+
+	// Verify all 3 calls are for different tasks (different comment IDs).
+	seen := make(map[string]bool)
+	for _, call := range notifier.checkCalls {
+		seen[call] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("expected 3 unique check calls, got %d unique: %v", len(seen), notifier.checkCalls)
 	}
 }

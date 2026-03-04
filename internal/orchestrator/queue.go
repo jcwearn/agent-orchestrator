@@ -2,7 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"time"
 
+	gogithub "github.com/google/go-github/v83/github"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
@@ -13,7 +16,26 @@ const (
 	StatusImplementing     = "implementing"
 	StatusComplete         = "complete"
 	StatusFailed           = "failed"
+	StatusCancelled        = "cancelled"
 )
+
+// isRateLimitError checks if err is a GitHub rate limit error and returns the
+// reset time if so.
+func isRateLimitError(err error) (time.Time, bool) {
+	var rlErr *gogithub.RateLimitError
+	if errors.As(err, &rlErr) {
+		return rlErr.Rate.Reset.Time, true
+	}
+	var abuseErr *gogithub.AbuseRateLimitError
+	if errors.As(err, &abuseErr) {
+		retryAfter := abuseErr.GetRetryAfter()
+		if retryAfter > 0 {
+			return time.Now().Add(retryAfter), true
+		}
+		return time.Now().Add(1 * time.Minute), true
+	}
+	return time.Time{}, false
+}
 
 var approvedValue = "approved"
 

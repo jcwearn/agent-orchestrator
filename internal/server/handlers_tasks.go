@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -231,6 +232,41 @@ func (s *Server) handleFeedbackTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.store.UpdateTask(r.Context(), task.ID, task); err != nil {
 		s.logger.Error("feedback task", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	s.hub.Broadcast(Event{Type: "task.updated", TaskID: task.ID, Data: task})
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	task, err := s.store.GetTask(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("get task for cancel", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	switch task.Status {
+	case "complete", "failed", "cancelled":
+		writeError(w, http.StatusConflict, fmt.Sprintf("task is already %s", task.Status))
+		return
+	}
+
+	task.Status = "cancelled"
+	now := time.Now().UTC()
+	task.CompletedAt = &now
+	msg := "Cancelled by user"
+	task.ErrorMessage = &msg
+	if err := s.store.UpdateTask(r.Context(), task.ID, task); err != nil {
+		s.logger.Error("cancel task", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
