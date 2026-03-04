@@ -16,8 +16,14 @@ type CreateTaskRequest struct {
 	BaseBranch string `json:"base_branch"`
 }
 
+type ApproveRequest struct {
+	RunTests  bool   `json:"run_tests"`
+	Decisions string `json:"decisions"`
+}
+
 type FeedbackRequest struct {
-	Feedback string `json:"feedback"`
+	Feedback  string `json:"feedback"`
+	Decisions string `json:"decisions"`
 }
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +133,17 @@ func (s *Server) handleApproveTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse optional body (tolerate empty body for backward compat).
+	var req ApproveRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
 	task.PlanFeedback = ptr("approved")
+	task.RunTests = req.RunTests
+	if req.Decisions != "" {
+		task.Decisions = &req.Decisions
+	}
 	if err := s.store.UpdateTask(r.Context(), task.ID, task); err != nil {
 		s.logger.Error("approve task", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
@@ -170,6 +186,9 @@ func (s *Server) handleFeedbackTask(w http.ResponseWriter, r *http.Request) {
 
 	task.PlanFeedback = &req.Feedback
 	task.PlanRevision++
+	if req.Decisions != "" {
+		task.Decisions = &req.Decisions
+	}
 	if err := s.store.UpdateTask(r.Context(), task.ID, task); err != nil {
 		s.logger.Error("feedback task", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")

@@ -283,6 +283,11 @@ func buildPlanPrompt(task *store.Task) string {
 			"   - Key functions, interfaces, or types involved\n"+
 			"   - Concrete steps to take\n"+
 			"4. **Verification** -- How to test and validate the changes\n\n"+
+			"If there are technical or product decisions to make, present each as a "+
+			"multiple-choice group using GitHub checkboxes. Example:\n"+
+			"### Decision: Database choice\n"+
+			"- [ ] PostgreSQL -- mature, ACID-compliant\n"+
+			"- [ ] SQLite -- simpler, no external dependency\n\n"+
 			"Reference specific files and code you found during exploration. "+
 			"Do not implement anything -- only plan.\n\n"+
 			"Task: %s",
@@ -297,6 +302,9 @@ func buildImplementPrompt(task *store.Task) string {
 			"Follow your git workflow rules for branching, committing, and PR creation.\n\nApproved plan:\n%s",
 		stringVal(task.Plan),
 	)
+	if task.Decisions != nil && *task.Decisions != "" {
+		prompt += "\n\nReviewer Decisions:\n" + *task.Decisions
+	}
 	if task.RunTests {
 		prompt += "\n\nIMPORTANT: Run the project's test suite before committing to verify nothing is broken."
 	}

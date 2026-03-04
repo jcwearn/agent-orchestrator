@@ -19,6 +19,7 @@ type Server struct {
 	logger        *slog.Logger
 	githubClient  *ghclient.Client // nil if GitHub not configured
 	webhookSecret []byte           // nil if GitHub not configured
+	allowedUsers  []string         // empty = allow all
 }
 
 func New(store *store.Store, pool *coder.Pool, executor coder.WorkspaceExecutor, hub *Hub, logger *slog.Logger, opts ...Option) *Server {
@@ -37,6 +38,14 @@ func New(store *store.Store, pool *coder.Pool, executor coder.WorkspaceExecutor,
 
 // Option configures optional Server fields.
 type Option func(*Server)
+
+// WithAllowedUsers restricts issue processing to the given GitHub usernames.
+// An empty list allows all users (backward compatible).
+func WithAllowedUsers(users []string) Option {
+	return func(s *Server) {
+		s.allowedUsers = users
+	}
+}
 
 // WithGitHub configures the GitHub App client and webhook secret.
 func WithGitHub(client *ghclient.Client, webhookSecret []byte) Option {

@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -70,6 +71,10 @@ func main() {
 	installationID := os.Getenv("GITHUB_APP_INSTALLATION_ID")
 	privateKey := os.Getenv("GITHUB_APP_PRIVATE_KEY")
 	webhookSecret := os.Getenv("GITHUB_WEBHOOK_SECRET")
+
+	if users := os.Getenv("GITHUB_ALLOWED_USERS"); users != "" {
+		serverOpts = append(serverOpts, server.WithAllowedUsers(strings.Split(users, ",")))
+	}
 
 	if appID != "" && installationID != "" && privateKey != "" {
 		parsedAppID, err := strconv.ParseInt(appID, 10, 64)
@@ -180,15 +185,17 @@ func (a *notifierAdapter) NotifyPlanReady(ctx context.Context, owner, repo strin
 	return a.notifier.NotifyPlanReady(ctx, owner, repo, issue, plan)
 }
 
-func (a *notifierAdapter) CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (bool, string, error) {
+func (a *notifierAdapter) CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (orchestrator.ApprovalResult, error) {
 	result, err := a.notifier.CheckApproval(ctx, owner, repo, issue, commentID)
 	if err != nil {
-		return false, "", err
+		return orchestrator.ApprovalResult{}, err
 	}
-	if result.Approved {
-		return true, "", nil
-	}
-	return false, result.Feedback, nil
+	return orchestrator.ApprovalResult{
+		Approved:  result.Approved,
+		RunTests:  result.RunTests,
+		Decisions: result.Decisions,
+		Feedback:  result.Feedback,
+	}, nil
 }
 
 func (a *notifierAdapter) NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error {

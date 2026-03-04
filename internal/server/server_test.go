@@ -392,6 +392,70 @@ func TestApproveTask_NotFound(t *testing.T) {
 	}
 }
 
+func TestApproveTask_WithRunTestsAndDecisions(t *testing.T) {
+	srv, s := testServer(t)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	task := createTask(t, s, "approve with options")
+	task.Status = "awaiting_approval"
+	plan := "### Decision: DB\n- [ ] PostgreSQL -- mature\n- [ ] SQLite -- simple"
+	task.Plan = &plan
+	_ = s.UpdateTask(context.Background(), task.ID, task)
+
+	body := `{"run_tests": true, "decisions": "- [x] PostgreSQL -- mature"}`
+	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var updated store.Task
+	_ = json.NewDecoder(resp.Body).Decode(&updated)
+	if !updated.RunTests {
+		t.Fatal("expected run_tests to be true")
+	}
+	if updated.Decisions == nil || *updated.Decisions != "- [x] PostgreSQL -- mature" {
+		t.Fatalf("expected decisions to be set, got %v", updated.Decisions)
+	}
+	if updated.PlanFeedback == nil || *updated.PlanFeedback != "approved" {
+		t.Fatal("expected plan_feedback to be 'approved'")
+	}
+}
+
+func TestApproveTask_EmptyBody(t *testing.T) {
+	srv, s := testServer(t)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	task := createTask(t, s, "approve empty body")
+	task.Status = "awaiting_approval"
+	_ = s.UpdateTask(context.Background(), task.ID, task)
+
+	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/approve", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var updated store.Task
+	_ = json.NewDecoder(resp.Body).Decode(&updated)
+	if updated.RunTests {
+		t.Fatal("expected run_tests to be false")
+	}
+	if updated.Decisions != nil {
+		t.Fatalf("expected decisions to be nil, got %v", updated.Decisions)
+	}
+}
+
 // --- feedback tests ---
 
 func TestFeedbackTask_Success(t *testing.T) {
@@ -444,6 +508,41 @@ func TestFeedbackTask_EmptyFeedback(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestFeedbackTask_WithDecisions(t *testing.T) {
+	srv, s := testServer(t)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	task := createTask(t, s, "feedback with decisions")
+	task.Status = "awaiting_approval"
+	plan := "the plan"
+	task.Plan = &plan
+	_ = s.UpdateTask(context.Background(), task.ID, task)
+
+	body := `{"feedback": "use PostgreSQL", "decisions": "- [x] PostgreSQL -- mature"}`
+	resp, err := http.Post(ts.URL+"/api/v1/tasks/"+task.ID+"/feedback", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var updated store.Task
+	_ = json.NewDecoder(resp.Body).Decode(&updated)
+	if updated.PlanFeedback == nil || *updated.PlanFeedback != "use PostgreSQL" {
+		t.Fatal("expected plan_feedback to be set")
+	}
+	if updated.Decisions == nil || *updated.Decisions != "- [x] PostgreSQL -- mature" {
+		t.Fatalf("expected decisions to be set, got %v", updated.Decisions)
+	}
+	if updated.PlanRevision != 1 {
+		t.Fatalf("expected plan_revision 1, got %d", updated.PlanRevision)
 	}
 }
 

@@ -10,6 +10,27 @@ import (
 	"github.com/google/uuid"
 )
 
+func (s *Store) GetTaskByPRNumber(ctx context.Context, owner, repo string, prNumber int) (*Task, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT
+		id, status, prompt, plan, plan_feedback, repo_url, base_branch,
+		source_type, github_owner, github_repo, github_issue, session_id,
+		workspace_id, current_step, plan_comment_id, plan_revision,
+		pr_url, pr_number, run_tests, decisions,
+		created_at, started_at, completed_at, error_message
+	FROM tasks
+	WHERE github_owner = ? AND github_repo = ? AND pr_number = ?
+	LIMIT 1`, owner, repo, prNumber)
+
+	t, err := scanTask(row)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get task by pr number: %w", err)
+	}
+	return t, nil
+}
+
 func (s *Store) GetTaskByGithubIssue(ctx context.Context, owner, repo string, issue int) (*Task, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT
 		id, status, prompt, plan, plan_feedback, repo_url, base_branch,

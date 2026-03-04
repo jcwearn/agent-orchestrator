@@ -614,8 +614,7 @@ type mockNotifier struct {
 	completeCalls           []string
 	failedCalls             []string
 	planReadyResult         int64
-	checkApproved           bool
-	checkFeedback           string
+	checkResult             ApprovalResult
 }
 
 func newMockNotifier() *mockNotifier {
@@ -629,11 +628,11 @@ func (m *mockNotifier) NotifyPlanReady(ctx context.Context, owner, repo string, 
 	return m.planReadyResult, nil
 }
 
-func (m *mockNotifier) CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (bool, string, error) {
+func (m *mockNotifier) CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (ApprovalResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.checkCalls = append(m.checkCalls, fmt.Sprintf("%s/%s#%d@%d", owner, repo, issue, commentID))
-	return m.checkApproved, m.checkFeedback, nil
+	return m.checkResult, nil
 }
 
 func (m *mockNotifier) NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error {
@@ -775,7 +774,7 @@ func TestFailTask_GitHubNotifyFailed(t *testing.T) {
 func TestProcessApprovedTasks_GitHubCheckApproval(t *testing.T) {
 	exec := newMockExecutor()
 	notifier := newMockNotifier()
-	notifier.checkApproved = true
+	notifier.checkResult = ApprovalResult{Approved: true}
 
 	o, s := testOrchestrator(t, exec, nil)
 	o.config.Notifier = notifier
@@ -809,7 +808,7 @@ func TestProcessApprovedTasks_GitHubCheckApproval(t *testing.T) {
 func TestProcessApprovedTasks_GitHubFeedback(t *testing.T) {
 	exec := newMockExecutor()
 	notifier := newMockNotifier()
-	notifier.checkFeedback = "please add tests"
+	notifier.checkResult = ApprovalResult{Feedback: "please add tests"}
 
 	o, s := testOrchestrator(t, exec, nil)
 	o.config.Notifier = notifier
@@ -1223,7 +1222,7 @@ func TestRunImplement_CapturesPRUrl(t *testing.T) {
 func TestProcessApprovedTasks_GitHubNotifyImplementationStarted(t *testing.T) {
 	exec := newMockExecutor()
 	notifier := newMockNotifier()
-	notifier.checkApproved = true
+	notifier.checkResult = ApprovalResult{Approved: true}
 
 	o, s := testOrchestrator(t, exec, nil)
 	o.config.Notifier = notifier
@@ -1276,5 +1275,103 @@ func TestBuildImplementPrompt_NoTests(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Follow your git workflow rules") {
 		t.Fatalf("expected git workflow rules reference, got: %s", prompt)
+	}
+}
+
+func TestBuildImplementPrompt_WithDecisions(t *testing.T) {
+	decisions := "- [x] PostgreSQL -- mature, ACID-compliant"
+	task := &store.Task{
+		Plan:      strPtr("the plan"),
+		Decisions: &decisions,
+	}
+	prompt := buildImplementPrompt(task)
+	if !strings.Contains(prompt, "Reviewer Decisions:") {
+		t.Fatalf("expected decisions header, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "PostgreSQL") {
+		t.Fatalf("expected decisions content, got: %s", prompt)
+	}
+}
+
+func TestBuildPlanPrompt_IncludesDecisionInstructions(t *testing.T) {
+	task := &store.Task{
+		Prompt:  "Add a feature",
+		RepoURL: "https://github.com/test/repo",
+	}
+	prompt := buildPlanPrompt(task)
+	if !strings.Contains(prompt, "Decision:") {
+		t.Fatalf("expected decision instructions in plan prompt, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "- [ ]") {
+		t.Fatalf("expected checkbox example in plan prompt, got: %s", prompt)
+	}
+}
+
+func TestProcessApprovedTasks_GitHubApprovalWithRunTestsAndDecisions(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	notifier.checkResult = ApprovalResult{
+		Approved:  true,
+		RunTests:  true,
+		Decisions: "- [x] PostgreSQL",
+	}
+
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "github with decisions")
+	task.Status = StatusAwaitingApproval
+	task.Plan = strPtr("the plan")
+	commentID := 42
+	task.PlanCommentID = &commentID
+	_ = s.UpdateTask(ctx, task.ID, task)
+
+	if err := o.processApprovedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, s, task.ID, StatusComplete, 5*time.Second)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if !updated.RunTests {
+		t.Fatal("expected RunTests to be true after approval")
+	}
+	if updated.Decisions == nil || *updated.Decisions != "- [x] PostgreSQL" {
+		t.Fatalf("expected decisions to be set, got %v", updated.Decisions)
+	}
+}
+
+func TestProcessApprovedTasks_GitHubFeedbackPreservesDecisions(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	notifier.checkResult = ApprovalResult{
+		Feedback:  "add error handling",
+		Decisions: "- [x] SQLite",
+	}
+
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	task := createGitHubTask(t, s, "github feedback decisions")
+	task.Status = StatusAwaitingApproval
+	task.Plan = strPtr("the plan")
+	commentID := 42
+	task.PlanCommentID = &commentID
+	_ = s.UpdateTask(ctx, task.ID, task)
+
+	if err := o.processApprovedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusAwaitingApproval {
+		t.Fatalf("expected awaiting_approval, got %s", updated.Status)
+	}
+	if updated.PlanFeedback == nil || *updated.PlanFeedback != "add error handling" {
+		t.Fatalf("expected feedback, got %v", updated.PlanFeedback)
+	}
+	if updated.Decisions == nil || *updated.Decisions != "- [x] SQLite" {
+		t.Fatalf("expected decisions preserved, got %v", updated.Decisions)
 	}
 }

@@ -479,6 +479,279 @@ func TestGitHubWebhook_DuplicateIssueEvent_Deduplicated(t *testing.T) {
 	}
 }
 
+// --- PullRequestEvent tests ---
+
+func TestGitHubWebhook_PRMerged_ClosesIssue(t *testing.T) {
+	var closedIssue bool
+	ghMux := http.NewServeMux()
+	ghMux.HandleFunc("PATCH /api/v3/repos/testowner/testrepo/issues/42", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			State string `json:"state"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.State == "closed" {
+			closedIssue = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gogithub.Issue{Number: gogithub.Ptr(42), State: gogithub.Ptr("closed")})
+	})
+	ghServer := httptest.NewServer(ghMux)
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHub(t, ghServer.URL)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	// Create a task with a PR number linked to this repo.
+	issueNum := 42
+	prNum := 7
+	task := &store.Task{
+		Prompt:      "test",
+		RepoURL:     "https://github.com/testowner/testrepo",
+		SourceType:  "github",
+		GithubOwner: gogithub.Ptr("testowner"),
+		GithubRepo:  gogithub.Ptr("testrepo"),
+		GithubIssue: &issueNum,
+		PRNumber:    &prNum,
+		SessionID:   "sess-1",
+	}
+	if err := s.CreateTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	event := gogithub.PullRequestEvent{
+		Action: gogithub.Ptr("closed"),
+		PullRequest: &gogithub.PullRequest{
+			Number: gogithub.Ptr(7),
+			Merged: gogithub.Ptr(true),
+		},
+		Repo: &gogithub.Repository{
+			Name:  gogithub.Ptr("testrepo"),
+			Owner: &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload, _ := json.Marshal(event)
+	signature := signPayload(payload, testWebhookSecret)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if !closedIssue {
+		t.Fatal("expected issue to be closed after PR merge")
+	}
+}
+
+func TestGitHubWebhook_PRClosedNotMerged_NoAction(t *testing.T) {
+	ghServer := httptest.NewServer(http.NewServeMux())
+	defer ghServer.Close()
+
+	srv, _ := testServerWithGitHub(t, ghServer.URL)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	event := gogithub.PullRequestEvent{
+		Action: gogithub.Ptr("closed"),
+		PullRequest: &gogithub.PullRequest{
+			Number: gogithub.Ptr(7),
+			Merged: gogithub.Ptr(false),
+		},
+		Repo: &gogithub.Repository{
+			Name:  gogithub.Ptr("testrepo"),
+			Owner: &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload, _ := json.Marshal(event)
+	signature := signPayload(payload, testWebhookSecret)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// --- Allowed users tests ---
+
+func testServerWithGitHubAndAllowedUsers(t *testing.T, ghServerURL string, users []string) (*Server, *store.Store) {
+	t.Helper()
+	s := testStore(t)
+	pool := coder.NewPool([]string{"agent-1", "agent-2"})
+	exec := &mockExecutor{}
+	hub := NewHub()
+
+	gc := gogithub.NewClient(nil)
+	gc, _ = gc.WithEnterpriseURLs(ghServerURL+"/", ghServerURL+"/")
+	client := &ghclient.Client{Client: gc}
+
+	srv := New(s, pool, exec, hub, slog.Default(), WithGitHub(client, []byte(testWebhookSecret)), WithAllowedUsers(users))
+	return srv, s
+}
+
+func TestGitHubWebhook_AllowedUser_Accepted(t *testing.T) {
+	ghMux := http.NewServeMux()
+	ghMux.HandleFunc("POST /api/v3/repos/testowner/testrepo/issues/1/comments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gogithub.IssueComment{ID: gogithub.Ptr(int64(1))})
+	})
+	ghServer := httptest.NewServer(ghMux)
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHubAndAllowedUsers(t, ghServer.URL, []string{"alice", "bob"})
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	event := gogithub.IssuesEvent{
+		Action: gogithub.Ptr("labeled"),
+		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Issue: &gogithub.Issue{
+			Number: gogithub.Ptr(1),
+			Title:  gogithub.Ptr("Test task"),
+			User:   &gogithub.User{Login: gogithub.Ptr("alice")},
+		},
+		Repo: &gogithub.Repository{
+			Name:     gogithub.Ptr("testrepo"),
+			CloneURL: gogithub.Ptr("https://github.com/testowner/testrepo.git"),
+			Owner:    &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload, _ := json.Marshal(event)
+	signature := signPayload(payload, testWebhookSecret)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	req.Header.Set("X-GitHub-Event", "issues")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	tasks, _ := s.ListTasks(context.Background(), "")
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task for allowed user, got %d", len(tasks))
+	}
+}
+
+func TestGitHubWebhook_DisallowedUser_Rejected(t *testing.T) {
+	ghServer := httptest.NewServer(http.NewServeMux())
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHubAndAllowedUsers(t, ghServer.URL, []string{"alice", "bob"})
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	event := gogithub.IssuesEvent{
+		Action: gogithub.Ptr("labeled"),
+		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Issue: &gogithub.Issue{
+			Number: gogithub.Ptr(1),
+			Title:  gogithub.Ptr("Test task"),
+			User:   &gogithub.User{Login: gogithub.Ptr("mallory")},
+		},
+		Repo: &gogithub.Repository{
+			Name:     gogithub.Ptr("testrepo"),
+			CloneURL: gogithub.Ptr("https://github.com/testowner/testrepo.git"),
+			Owner:    &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload, _ := json.Marshal(event)
+	signature := signPayload(payload, testWebhookSecret)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	req.Header.Set("X-GitHub-Event", "issues")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	tasks, _ := s.ListTasks(context.Background(), "")
+	if len(tasks) != 0 {
+		t.Fatalf("expected 0 tasks for disallowed user, got %d", len(tasks))
+	}
+}
+
+func TestGitHubWebhook_EmptyAllowedUsers_AllowsAll(t *testing.T) {
+	ghMux := http.NewServeMux()
+	ghMux.HandleFunc("POST /api/v3/repos/testowner/testrepo/issues/1/comments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gogithub.IssueComment{ID: gogithub.Ptr(int64(1))})
+	})
+	ghServer := httptest.NewServer(ghMux)
+	defer ghServer.Close()
+
+	// No WithAllowedUsers option — uses default testServerWithGitHub.
+	srv, s := testServerWithGitHub(t, ghServer.URL)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	event := gogithub.IssuesEvent{
+		Action: gogithub.Ptr("labeled"),
+		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Issue: &gogithub.Issue{
+			Number: gogithub.Ptr(1),
+			Title:  gogithub.Ptr("Test task"),
+			User:   &gogithub.User{Login: gogithub.Ptr("anyone")},
+		},
+		Repo: &gogithub.Repository{
+			Name:     gogithub.Ptr("testrepo"),
+			CloneURL: gogithub.Ptr("https://github.com/testowner/testrepo.git"),
+			Owner:    &gogithub.User{Login: gogithub.Ptr("testowner")},
+		},
+	}
+	payload, _ := json.Marshal(event)
+	signature := signPayload(payload, testWebhookSecret)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/webhooks/github", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	req.Header.Set("X-GitHub-Event", "issues")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	tasks, _ := s.ListTasks(context.Background(), "")
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task with no allowed users restriction, got %d", len(tasks))
+	}
+}
+
 func TestGitHubWebhook_IssuesOpened_WithoutAITaskLabel(t *testing.T) {
 	ghServer := httptest.NewServer(http.NewServeMux())
 	defer ghServer.Close()
