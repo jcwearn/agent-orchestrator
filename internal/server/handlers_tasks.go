@@ -16,10 +16,10 @@ import (
 )
 
 type CreateTaskRequest struct {
-	Prompt      string `json:"prompt"`
-	RepoURL     string `json:"repo_url"`
-	BaseBranch  string `json:"base_branch"`
-	CreateIssue bool   `json:"create_issue"`
+	Title      string `json:"title"`
+	Prompt     string `json:"prompt"`
+	RepoURL    string `json:"repo_url"`
+	BaseBranch string `json:"base_branch"`
 }
 
 type ApproveRequest struct {
@@ -58,35 +58,34 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		SourceType: "api",
 		SessionID:  uuid.New().String(),
 	}
+	if req.Title != "" {
+		task.Title = &req.Title
+	}
 
-	if req.CreateIssue {
-		if s.githubClient == nil {
-			writeError(w, http.StatusBadRequest, "GitHub integration not configured")
-			return
-		}
-
+	// Auto-create GitHub issue when configured and repo is on GitHub.
+	if s.autoCreateIssues && s.githubClient != nil {
 		owner, repo, err := parseGitHubRepo(req.RepoURL)
-		if err != nil || owner == "" {
-			writeError(w, http.StatusBadRequest, "repo_url must be a valid GitHub repository URL")
-			return
+		if err == nil && owner != "" {
+			issueTitle := req.Title
+			issueBody := req.Prompt
+			if issueTitle == "" {
+				issueTitle, issueBody = splitPromptForIssue(req.Prompt)
+			}
+			issue, _, err := s.githubClient.Issues.Create(r.Context(), owner, repo, &gogithub.IssueRequest{
+				Title:  &issueTitle,
+				Body:   &issueBody,
+				Labels: &[]string{aiTaskLabel},
+			})
+			if err != nil {
+				s.logger.Error("auto-create github issue", "error", err)
+				// Non-fatal: continue creating the task without an issue.
+			} else {
+				issueNumber := issue.GetNumber()
+				task.GithubOwner = &owner
+				task.GithubRepo = &repo
+				task.GithubIssue = &issueNumber
+			}
 		}
-
-		title, body := splitPromptForIssue(req.Prompt)
-		issue, _, err := s.githubClient.Issues.Create(r.Context(), owner, repo, &gogithub.IssueRequest{
-			Title:  &title,
-			Body:   &body,
-			Labels: &[]string{aiTaskLabel},
-		})
-		if err != nil {
-			s.logger.Error("create github issue", "error", err)
-			writeError(w, http.StatusBadGateway, "failed to create GitHub issue")
-			return
-		}
-
-		issueNumber := issue.GetNumber()
-		task.GithubOwner = &owner
-		task.GithubRepo = &repo
-		task.GithubIssue = &issueNumber
 	}
 
 	if err := s.store.CreateTask(r.Context(), task); err != nil {

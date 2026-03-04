@@ -8,6 +8,7 @@ import (
 type AgentInfo struct {
 	Name            string `json:"name"`
 	TaskID          string `json:"task_id"`
+	TaskTitle       string `json:"task_title"`
 	WorkspaceStatus string `json:"workspace_status"`
 }
 
@@ -26,11 +27,17 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 
 	agents := make([]AgentInfo, 0, len(slots))
 	for _, slot := range slots {
-		agents = append(agents, AgentInfo{
+		info := AgentInfo{
 			Name:            slot.Name,
 			TaskID:          slot.TaskID,
 			WorkspaceStatus: statusMap[slot.Name],
-		})
+		}
+		if slot.TaskID != "" {
+			if task, err := s.store.GetTask(r.Context(), slot.TaskID); err == nil && task.Title != nil {
+				info.TaskTitle = *task.Title
+			}
+		}
+		agents = append(agents, info)
 	}
 
 	sort.Slice(agents, func(i, j int) bool {

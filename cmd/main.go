@@ -76,6 +76,10 @@ func main() {
 		serverOpts = append(serverOpts, server.WithAllowedUsers(strings.Split(users, ",")))
 	}
 
+	// Auto-create GitHub issues for new tasks (default: true).
+	createIssues := envOr("CREATE_GITHUB_ISSUES", "true")
+	serverOpts = append(serverOpts, server.WithAutoCreateIssues(createIssues == "true"))
+
 	if appID != "" && installationID != "" && privateKey != "" {
 		parsedAppID, err := strconv.ParseInt(appID, 10, 64)
 		if err != nil {

@@ -59,8 +59,11 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold text-zinc-100 break-words">
-            {task.prompt}
+            {task.title ?? task.prompt}
           </h1>
+          {task.title && (
+            <p className="mt-2 text-sm text-zinc-300 whitespace-pre-wrap">{task.prompt}</p>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-zinc-400">
             <StatusBadge status={task.status} />
             <span>{task.repo_url.replace(/^https?:\/\/github\.com\//, "")}</span>

@@ -1,6 +1,7 @@
 export interface Task {
   id: string
   status: string
+  title: string | null
   prompt: string
   plan: string | null
   plan_feedback: string | null
@@ -37,6 +38,7 @@ export interface TaskLog {
 export interface AgentInfo {
   name: string
   task_id: string
+  task_title: string
   workspace_status: string
 }
 
@@ -47,14 +49,15 @@ export interface WSEvent {
 }
 
 export interface CreateTaskRequest {
+  title?: string
   prompt: string
   repo_url: string
   base_branch: string
-  create_issue?: boolean
 }
 
 export interface ConfigResponse {
   github_configured: boolean
+  auto_create_issues: boolean
 }
 
 export interface RepoInfo {

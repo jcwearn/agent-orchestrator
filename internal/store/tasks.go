@@ -12,7 +12,7 @@ import (
 
 func (s *Store) GetTaskByPRNumber(ctx context.Context, owner, repo string, prNumber int) (*Task, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT
-		id, status, prompt, plan, plan_feedback, repo_url, base_branch,
+		id, status, title, prompt, plan, plan_feedback, repo_url, base_branch,
 		source_type, github_owner, github_repo, github_issue, session_id,
 		workspace_id, current_step, plan_comment_id, plan_revision,
 		pr_url, pr_number, run_tests, decisions,
@@ -33,7 +33,7 @@ func (s *Store) GetTaskByPRNumber(ctx context.Context, owner, repo string, prNum
 
 func (s *Store) GetTaskByGithubIssue(ctx context.Context, owner, repo string, issue int) (*Task, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT
-		id, status, prompt, plan, plan_feedback, repo_url, base_branch,
+		id, status, title, prompt, plan, plan_feedback, repo_url, base_branch,
 		source_type, github_owner, github_repo, github_issue, session_id,
 		workspace_id, current_step, plan_comment_id, plan_revision,
 		pr_url, pr_number, run_tests, decisions,
@@ -64,19 +64,19 @@ func (s *Store) CreateTask(ctx context.Context, t *Task) error {
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO tasks (
-			id, status, prompt, plan, plan_feedback, repo_url, base_branch,
+			id, status, title, prompt, plan, plan_feedback, repo_url, base_branch,
 			source_type, github_owner, github_repo, github_issue, session_id,
 			workspace_id, current_step, plan_comment_id, plan_revision,
 			pr_url, pr_number, run_tests, decisions,
 			created_at, started_at, completed_at, error_message
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?, ?
 		)`,
-		t.ID, t.Status, t.Prompt, t.Plan, t.PlanFeedback, t.RepoURL, t.BaseBranch,
+		t.ID, t.Status, t.Title, t.Prompt, t.Plan, t.PlanFeedback, t.RepoURL, t.BaseBranch,
 		t.SourceType, t.GithubOwner, t.GithubRepo, t.GithubIssue, t.SessionID,
 		t.WorkspaceID, t.CurrentStep, t.PlanCommentID, t.PlanRevision,
 		t.PRUrl, t.PRNumber, t.RunTests, t.Decisions,
@@ -93,7 +93,7 @@ func (s *Store) CreateTask(ctx context.Context, t *Task) error {
 
 func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT
-		id, status, prompt, plan, plan_feedback, repo_url, base_branch,
+		id, status, title, prompt, plan, plan_feedback, repo_url, base_branch,
 		source_type, github_owner, github_repo, github_issue, session_id,
 		workspace_id, current_step, plan_comment_id, plan_revision,
 		pr_url, pr_number, run_tests, decisions,
@@ -116,7 +116,7 @@ func (s *Store) ListTasks(ctx context.Context, status string) ([]Task, error) {
 
 	if status == "" {
 		rows, err = s.db.QueryContext(ctx, `SELECT
-			id, status, prompt, plan, plan_feedback, repo_url, base_branch,
+			id, status, title, prompt, plan, plan_feedback, repo_url, base_branch,
 			source_type, github_owner, github_repo, github_issue, session_id,
 			workspace_id, current_step, plan_comment_id, plan_revision,
 			pr_url, pr_number, run_tests, decisions,
@@ -124,7 +124,7 @@ func (s *Store) ListTasks(ctx context.Context, status string) ([]Task, error) {
 		FROM tasks ORDER BY created_at DESC`)
 	} else {
 		rows, err = s.db.QueryContext(ctx, `SELECT
-			id, status, prompt, plan, plan_feedback, repo_url, base_branch,
+			id, status, title, prompt, plan, plan_feedback, repo_url, base_branch,
 			source_type, github_owner, github_repo, github_issue, session_id,
 			workspace_id, current_step, plan_comment_id, plan_revision,
 			pr_url, pr_number, run_tests, decisions,
@@ -150,7 +150,7 @@ func (s *Store) ListTasks(ctx context.Context, status string) ([]Task, error) {
 func (s *Store) UpdateTask(ctx context.Context, id string, t *Task) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE tasks SET
-			status = ?, prompt = ?, plan = ?, plan_feedback = ?,
+			status = ?, title = ?, prompt = ?, plan = ?, plan_feedback = ?,
 			repo_url = ?, base_branch = ?, source_type = ?,
 			github_owner = ?, github_repo = ?, github_issue = ?,
 			session_id = ?, workspace_id = ?, current_step = ?,
@@ -158,7 +158,7 @@ func (s *Store) UpdateTask(ctx context.Context, id string, t *Task) error {
 			pr_url = ?, pr_number = ?, run_tests = ?, decisions = ?,
 			started_at = ?, completed_at = ?, error_message = ?
 		WHERE id = ?`,
-		t.Status, t.Prompt, t.Plan, t.PlanFeedback,
+		t.Status, t.Title, t.Prompt, t.Plan, t.PlanFeedback,
 		t.RepoURL, t.BaseBranch, t.SourceType,
 		t.GithubOwner, t.GithubRepo, t.GithubIssue,
 		t.SessionID, t.WorkspaceID, t.CurrentStep,
@@ -273,7 +273,7 @@ type scanner interface {
 func scanTask(s scanner) (*Task, error) {
 	var t Task
 	err := s.Scan(
-		&t.ID, &t.Status, &t.Prompt, &t.Plan, &t.PlanFeedback,
+		&t.ID, &t.Status, &t.Title, &t.Prompt, &t.Plan, &t.PlanFeedback,
 		&t.RepoURL, &t.BaseBranch, &t.SourceType,
 		&t.GithubOwner, &t.GithubRepo, &t.GithubIssue,
 		&t.SessionID, &t.WorkspaceID, &t.CurrentStep,

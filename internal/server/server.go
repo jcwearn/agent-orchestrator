@@ -19,8 +19,9 @@ type Server struct {
 	logger        *slog.Logger
 	githubClient  *ghclient.Client // nil if GitHub not configured
 	webhookSecret []byte           // nil if GitHub not configured
-	allowedUsers  []string         // empty = allow all
-	repoCache     repoCache
+	allowedUsers     []string // empty = allow all
+	autoCreateIssues bool
+	repoCache        repoCache
 }
 
 func New(store *store.Store, pool *coder.Pool, executor coder.WorkspaceExecutor, hub *Hub, logger *slog.Logger, opts ...Option) *Server {
@@ -45,6 +46,13 @@ type Option func(*Server)
 func WithAllowedUsers(users []string) Option {
 	return func(s *Server) {
 		s.allowedUsers = users
+	}
+}
+
+// WithAutoCreateIssues enables automatic GitHub issue creation for new tasks.
+func WithAutoCreateIssues(enabled bool) Option {
+	return func(s *Server) {
+		s.autoCreateIssues = enabled
 	}
 }
 
