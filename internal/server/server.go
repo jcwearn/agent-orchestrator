@@ -20,6 +20,7 @@ type Server struct {
 	githubClient  *ghclient.Client // nil if GitHub not configured
 	webhookSecret []byte           // nil if GitHub not configured
 	allowedUsers  []string         // empty = allow all
+	repoCache     repoCache
 }
 
 func New(store *store.Store, pool *coder.Pool, executor coder.WorkspaceExecutor, hub *Hub, logger *slog.Logger, opts ...Option) *Server {

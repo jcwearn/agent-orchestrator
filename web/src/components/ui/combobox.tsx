@@ -77,8 +77,8 @@ export function Combobox({
         setHighlightIndex((i) => (i > 0 ? i - 1 : i))
         break
       case "Enter":
-        e.preventDefault()
         if (highlightIndex >= 0 && highlightIndex < filtered.length) {
+          e.preventDefault()
           onChange(filtered[highlightIndex].value)
           setOpen(false)
         }
