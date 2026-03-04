@@ -74,7 +74,7 @@ func (o *Orchestrator) stepPlan(ctx context.Context, task *store.Task, workspace
 		return err
 	}
 	cmd := fmt.Sprintf(
-		"cd %s && TERM=dumb claude --session-id %s -p %s --print",
+		"cd %s && TERM=dumb claude --session-id %s -p %s --print --allowedTools 'Bash,Read,Glob,Grep,Task'",
 		shellQuote(repoDir),
 		shellQuote(task.SessionID),
 		shellQuote(buildPlanPrompt(task)),
@@ -294,7 +294,7 @@ func buildPlanPrompt(task *store.Task) string {
 			"- Use Grep to search for related code, patterns, and existing conventions\n"+
 			"- Use Read to examine key files, interfaces, and functions you will need to modify or extend\n"+
 			"- Use Bash for read-only commands (e.g., git log, ls) to gather additional context\n\n"+
-			"After exploring, output ONLY the implementation plan in markdown. The plan must include:\n\n"+
+			"After exploring, print the complete implementation plan as your final response in markdown — do not write it to any file. The plan must include:\n\n"+
 			"1. **Objective** -- One-sentence restatement of what will be built or changed\n"+
 			"2. **Key Findings** -- What you discovered during exploration that informs the approach "+
 			"(existing patterns to follow, utilities to reuse, constraints found)\n"+
