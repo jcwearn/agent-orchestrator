@@ -112,6 +112,22 @@ func main() {
 		orchConfig.Notifier = &notifierAdapter{notifier: notifier}
 	}
 
+	// Periodically clean up expired sessions.
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.DeleteExpiredSessions(ctx); err != nil {
+					logger.Error("delete expired sessions", "error", err)
+				}
+			}
+		}
+	}()
+
 	orch := orchestrator.New(s, exec, pool, logger, orchConfig)
 	go func() {
 		if err := orch.Run(ctx); err != nil && err != context.Canceled {
