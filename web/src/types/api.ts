@@ -57,6 +57,11 @@ export interface ConfigResponse {
   github_configured: boolean
 }
 
+export interface RepoInfo {
+  full_name: string
+  clone_url: string
+}
+
 export interface AuthUser {
   id: string
   username: string

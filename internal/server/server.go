@@ -20,6 +20,7 @@ type Server struct {
 	githubClient  *ghclient.Client // nil if GitHub not configured
 	webhookSecret []byte           // nil if GitHub not configured
 	allowedUsers  []string         // empty = allow all
+	repoCache     repoCache
 }
 
 func New(store *store.Store, pool *coder.Pool, executor coder.WorkspaceExecutor, hub *Hub, logger *slog.Logger, opts ...Option) *Server {
@@ -80,6 +81,7 @@ func (s *Server) Routes() chi.Router {
 			r.Get("/tasks/{id}/logs", s.handleStreamLogs)
 
 			r.Get("/agents", s.handleListAgents)
+			r.Get("/repositories", s.handleListRepos)
 
 			r.Get("/ws", s.handleWebSocket)
 		})

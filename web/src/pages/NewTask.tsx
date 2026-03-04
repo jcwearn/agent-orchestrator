@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
+import { Combobox } from "@/components/ui/combobox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { createTask, getConfig } from "@/api/client"
+import { createTask, getConfig, listRepositories } from "@/api/client"
+import type { RepoInfo } from "@/types/api"
 
 export function NewTask() {
   const navigate = useNavigate()
@@ -12,12 +14,19 @@ export function NewTask() {
   const [repoUrl, setRepoUrl] = useState("")
   const [baseBranch, setBaseBranch] = useState("main")
   const [createIssue, setCreateIssue] = useState(false)
+  const [repos, setRepos] = useState<RepoInfo[]>([])
+  const [reposLoading, setReposLoading] = useState(false)
   const [githubConfigured, setGithubConfigured] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
   useEffect(() => {
     getConfig().then((c) => setGithubConfigured(c.github_configured)).catch(() => {})
+    setReposLoading(true)
+    listRepositories()
+      .then(setRepos)
+      .catch(() => {})
+      .finally(() => setReposLoading(false))
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -58,12 +67,13 @@ export function NewTask() {
 
         <div className="space-y-2">
           <Label htmlFor="repo_url">Repository URL</Label>
-          <Input
+          <Combobox
             id="repo_url"
-            placeholder="https://github.com/owner/repo"
+            options={repos.map((r) => ({ label: r.full_name, value: r.clone_url }))}
             value={repoUrl}
-            onChange={(e) => setRepoUrl(e.target.value)}
-            className="bg-zinc-950 border-zinc-700"
+            onChange={setRepoUrl}
+            placeholder="https://github.com/owner/repo"
+            loading={reposLoading}
             required
           />
         </div>
