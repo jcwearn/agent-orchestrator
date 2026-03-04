@@ -23,6 +23,7 @@ type Notifier interface {
 	NotifyPlanReady(ctx context.Context, owner, repo string, issue int, plan string) (commentID int64, err error)
 	CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (ApprovalResult, error)
 	NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error
+	NotifyPlanRevisionStarted(ctx context.Context, owner, repo string, issue int) error
 	NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error
 	NotifyFailed(ctx context.Context, owner, repo string, issue int, reason string) error
 	LinkPRToIssue(ctx context.Context, owner, repo string, prNumber, issue int) error
@@ -110,6 +111,13 @@ func (o *Orchestrator) tick(ctx context.Context) error {
 		return nil
 	}
 
+	// Check for awaiting_approval tasks that need re-planning (feedback received).
+	if task, err := o.nextReplanTask(ctx); err != nil {
+		return fmt.Errorf("next replan task: %w", err)
+	} else if task != nil {
+		return o.launchPlanTask(ctx, task)
+	}
+
 	task, err := o.nextTask(ctx)
 	if err != nil {
 		return fmt.Errorf("next task: %w", err)
@@ -118,13 +126,37 @@ func (o *Orchestrator) tick(ctx context.Context) error {
 		return nil
 	}
 
+	return o.launchPlanTask(ctx, task)
+}
+
+// nextReplanTask returns an awaiting_approval task that has feedback requiring
+// a plan revision, or nil if none exist.
+func (o *Orchestrator) nextReplanTask(ctx context.Context) (*store.Task, error) {
+	tasks, err := o.store.ListTasks(ctx, StatusAwaitingApproval)
+	if err != nil {
+		return nil, err
+	}
+	for i := range tasks {
+		if needsReplan(&tasks[i]) {
+			return &tasks[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// launchPlanTask acquires a workspace, marks the task as planning, and launches
+// runTask in a goroutine. Used for both new tasks and replan tasks.
+func (o *Orchestrator) launchPlanTask(ctx context.Context, task *store.Task) error {
 	workspace, err := o.pool.Acquire(task.ID)
 	if err != nil {
 		return nil // no free workspace, try next tick
 	}
 
+	// Clear feedback so the task isn't picked up again as a replan.
+	task.PlanFeedback = nil
+
 	// Mark as planning synchronously before launching the goroutine so the
-	// next tick does not pick up the same task while it is still "queued".
+	// next tick does not pick up the same task again.
 	task.Status = StatusPlanning
 	task.WorkspaceID = &workspace
 	if err := o.store.UpdateTask(ctx, task.ID, task); err != nil {
@@ -134,6 +166,13 @@ func (o *Orchestrator) tick(ctx context.Context) error {
 		return fmt.Errorf("mark task planning: %w", err)
 	}
 	o.publishEvent(task.ID, "task.updated")
+
+	// For GitHub replan tasks, post acknowledgment comment.
+	if o.isGitHubTask(task) && task.PlanRevision > 0 {
+		if err := o.config.Notifier.NotifyPlanRevisionStarted(ctx, *task.GithubOwner, *task.GithubRepo, *task.GithubIssue); err != nil {
+			o.logger.Error("notify plan revision started", "task_id", task.ID, "error", err)
+		}
+	}
 
 	go o.runTask(ctx, task, workspace)
 	return nil
@@ -183,7 +222,9 @@ func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
 			continue
 		}
 
-		if isApproved(t) {
+		if needsReplan(t) {
+			continue // handled by tick() via nextReplanTask()
+		} else if isApproved(t) {
 			approved = append(approved, t)
 		} else if o.isGitHubTask(t) && t.PlanCommentID != nil {
 			needsCheck = append(needsCheck, t)

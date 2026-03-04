@@ -120,6 +120,13 @@ func (n *Notifier) CheckApproval(ctx context.Context, owner, repo string, issue 
 	return ApprovalResult{}, nil
 }
 
+// NotifyPlanRevisionStarted posts a comment acknowledging that feedback was
+// received and the plan is being revised.
+func (n *Notifier) NotifyPlanRevisionStarted(ctx context.Context, owner, repo string, issue int) error {
+	body := "## Revising Plan\n\nFeedback received. Revising the plan..."
+	return n.postComment(ctx, owner, repo, issue, body)
+}
+
 // NotifyImplementationStarted posts a comment indicating implementation has begun.
 func (n *Notifier) NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error {
 	body := "## Implementation Started\n\nThe plan has been approved. Implementation is now in progress..."

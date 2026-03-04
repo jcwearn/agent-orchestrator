@@ -614,6 +614,7 @@ type mockNotifier struct {
 	planReadyCalls          []string
 	checkCalls              []string
 	implStartedCalls        []string
+	planRevisionCalls       []string
 	completeCalls           []string
 	failedCalls             []string
 	linkPRCalls             []string
@@ -647,6 +648,13 @@ func (m *mockNotifier) NotifyImplementationStarted(ctx context.Context, owner, r
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.implStartedCalls = append(m.implStartedCalls, fmt.Sprintf("%s/%s#%d", owner, repo, issue))
+	return nil
+}
+
+func (m *mockNotifier) NotifyPlanRevisionStarted(ctx context.Context, owner, repo string, issue int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.planRevisionCalls = append(m.planRevisionCalls, fmt.Sprintf("%s/%s#%d", owner, repo, issue))
 	return nil
 }
 
@@ -1762,5 +1770,159 @@ func TestRunImplement_CancelledDuringImplementation(t *testing.T) {
 	}
 	if o.pool.FreeCount() != len(coder.DefaultWorkspaces) {
 		t.Fatal("workspace not released")
+	}
+}
+
+func TestNeedsReplan(t *testing.T) {
+	tests := []struct {
+		name     string
+		feedback *string
+		want     bool
+	}{
+		{"nil feedback", nil, false},
+		{"empty feedback", strPtr(""), false},
+		{"approved", strPtr("approved"), false},
+		{"has feedback", strPtr("please add error handling"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &store.Task{PlanFeedback: tt.feedback}
+			if got := needsReplan(task); got != tt.want {
+				t.Errorf("needsReplan() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildPlanPrompt_IncludesFeedback(t *testing.T) {
+	plan := "Original plan content"
+	feedback := "Add error handling to phase 2"
+	task := &store.Task{
+		Prompt:       "implement feature X",
+		RepoURL:      "https://github.com/test/repo.git",
+		BaseBranch:   "main",
+		Plan:         &plan,
+		PlanFeedback: &feedback,
+		PlanRevision: 1,
+	}
+
+	prompt := buildPlanPrompt(task)
+
+	if !strings.Contains(prompt, "Previous plan:") {
+		t.Error("expected prompt to contain 'Previous plan:'")
+	}
+	if !strings.Contains(prompt, plan) {
+		t.Error("expected prompt to contain the previous plan text")
+	}
+	if !strings.Contains(prompt, "Reviewer feedback (revision 1):") {
+		t.Error("expected prompt to contain 'Reviewer feedback (revision 1):'")
+	}
+	if !strings.Contains(prompt, feedback) {
+		t.Error("expected prompt to contain the feedback text")
+	}
+	if !strings.Contains(prompt, "Revise the plan to address this feedback.") {
+		t.Error("expected prompt to contain revision instruction")
+	}
+}
+
+func TestBuildPlanPrompt_NoFeedbackOnFirstRevision(t *testing.T) {
+	task := &store.Task{
+		Prompt:       "implement feature X",
+		RepoURL:      "https://github.com/test/repo.git",
+		BaseBranch:   "main",
+		PlanRevision: 0,
+	}
+
+	prompt := buildPlanPrompt(task)
+
+	if strings.Contains(prompt, "Previous plan:") {
+		t.Error("expected prompt NOT to contain 'Previous plan:' for first revision")
+	}
+}
+
+func TestTick_PicksUpReplanTask(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	// Create a GitHub task in awaiting_approval with feedback.
+	task := createGitHubTask(t, s, "replan task")
+	plan := "original plan"
+	feedback := "needs more detail"
+	task.Status = StatusAwaitingApproval
+	task.Plan = &plan
+	task.PlanFeedback = &feedback
+	task.PlanRevision = 1
+	planCommentID := 42
+	task.PlanCommentID = &planCommentID
+	if err := s.UpdateTask(ctx, task.ID, task); err != nil {
+		t.Fatal(err)
+	}
+
+	// tick() should pick it up and transition to planning.
+	if err := o.tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for the task to go through planning and back to awaiting_approval.
+	waitForStatus(t, s, task.ID, StatusAwaitingApproval, 5*time.Second)
+
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Plan == nil || *updated.Plan == plan {
+		t.Error("expected plan to be updated after replan")
+	}
+	// PlanFeedback should have been cleared (set to nil) before planning started,
+	// and remains nil after planning completes (runTask doesn't set it).
+	if updated.PlanFeedback != nil {
+		t.Errorf("expected PlanFeedback to be nil after replan, got %q", *updated.PlanFeedback)
+	}
+
+	// Should have posted a revision acknowledgment.
+	notifier.mu.Lock()
+	revCalls := len(notifier.planRevisionCalls)
+	notifier.mu.Unlock()
+	if revCalls != 1 {
+		t.Errorf("expected 1 NotifyPlanRevisionStarted call, got %d", revCalls)
+	}
+}
+
+func TestProcessApprovedTasks_SkipsReplanTasks(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	o, s := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+	ctx := context.Background()
+
+	// Create a GitHub task in awaiting_approval with feedback (needs replan).
+	task := createGitHubTask(t, s, "feedback task")
+	feedback := "change approach"
+	task.Status = StatusAwaitingApproval
+	task.PlanFeedback = &feedback
+	task.PlanRevision = 1
+	planCommentID := 42
+	task.PlanCommentID = &planCommentID
+	if err := s.UpdateTask(ctx, task.ID, task); err != nil {
+		t.Fatal(err)
+	}
+
+	// processApprovedTasks should skip this task (not check approval, not launch implementation).
+	if err := o.processApprovedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Task should still be in awaiting_approval (not implementing).
+	updated, _ := s.GetTask(ctx, task.ID)
+	if updated.Status != StatusAwaitingApproval {
+		t.Errorf("expected awaiting_approval, got %s", updated.Status)
+	}
+
+	// No approval check calls should have been made.
+	notifier.mu.Lock()
+	checkCalls := len(notifier.checkCalls)
+	notifier.mu.Unlock()
+	if checkCalls != 0 {
+		t.Errorf("expected 0 CheckApproval calls, got %d", checkCalls)
 	}
 }
