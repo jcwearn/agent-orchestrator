@@ -10,11 +10,18 @@ import (
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
+// ApprovalResult holds the outcome of checking a plan comment for approval.
+type ApprovalResult struct {
+	Approved  bool
+	RunTests  bool
+	Decisions string
+	Feedback  string
+}
+
 // Notifier is called at lifecycle transitions for GitHub-sourced tasks.
-// The github.Notifier satisfies this interface structurally.
 type Notifier interface {
 	NotifyPlanReady(ctx context.Context, owner, repo string, issue int, plan string) (commentID int64, err error)
-	CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (approved bool, feedback string, err error)
+	CheckApproval(ctx context.Context, owner, repo string, issue int, commentID int64) (ApprovalResult, error)
 	NotifyImplementationStarted(ctx context.Context, owner, repo string, issue int) error
 	NotifyComplete(ctx context.Context, owner, repo string, issue int, prURL string) error
 	NotifyFailed(ctx context.Context, owner, repo string, issue int, reason string) error
@@ -138,21 +145,28 @@ func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
 
 		// For unapproved GitHub tasks with a plan comment, poll GitHub for approval.
 		if !isApproved(t) && o.isGitHubTask(t) && t.PlanCommentID != nil {
-			approved, feedback, err := o.config.Notifier.CheckApproval(ctx, *t.GithubOwner, *t.GithubRepo, *t.GithubIssue, int64(*t.PlanCommentID))
+			result, err := o.config.Notifier.CheckApproval(ctx, *t.GithubOwner, *t.GithubRepo, *t.GithubIssue, int64(*t.PlanCommentID))
 			if err != nil {
 				o.logger.Error("check approval", "task_id", t.ID, "error", err)
 				continue
 			}
-			if approved {
+			if result.Approved {
 				t.PlanFeedback = &approvedValue
+				t.RunTests = result.RunTests
+				if result.Decisions != "" {
+					t.Decisions = &result.Decisions
+				}
 				if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
 					o.logger.Error("update task after github approval", "task_id", t.ID, "error", err)
 					continue
 				}
 				o.publishEvent(t.ID, "task.updated")
-			} else if feedback != "" {
-				t.PlanFeedback = &feedback
+			} else if result.Feedback != "" {
+				t.PlanFeedback = &result.Feedback
 				t.PlanRevision++
+				if result.Decisions != "" {
+					t.Decisions = &result.Decisions
+				}
 				if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
 					o.logger.Error("update task with github feedback", "task_id", t.ID, "error", err)
 				}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	gogithub "github.com/google/go-github/v83/github"
@@ -40,6 +41,12 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to process event")
 			return
 		}
+	case *gogithub.PullRequestEvent:
+		if err := s.handlePullRequestEvent(r, e); err != nil {
+			s.logger.Error("failed to handle pull request event", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to process event")
+			return
+		}
 	default:
 		s.logger.Info("ignoring unhandled webhook event type", "type", gogithub.WebHookType(r))
 	}
@@ -67,6 +74,15 @@ func (s *Server) handleIssuesEvent(r *http.Request, event *gogithub.IssuesEvent)
 	owner := repo.GetOwner().GetLogin()
 	repoName := repo.GetName()
 	issueNumber := issue.GetNumber()
+
+	if len(s.allowedUsers) > 0 {
+		author := issue.GetUser().GetLogin()
+		if !slices.Contains(s.allowedUsers, author) {
+			s.logger.Info("ignoring issue from unauthorized user",
+				"user", author, "owner", owner, "repo", repoName, "issue", issueNumber)
+			return nil
+		}
+	}
 
 	s.logger.Info("processing ai-task label",
 		"owner", owner, "repo", repoName, "issue", issueNumber)
@@ -125,6 +141,41 @@ func (s *Server) handleIssuesEvent(r *http.Request, event *gogithub.IssuesEvent)
 	if err != nil {
 		s.logger.Error("failed to post acknowledgement comment", "issue", issueNumber, "error", err)
 		// Non-fatal: task was already created.
+	}
+
+	return nil
+}
+
+func (s *Server) handlePullRequestEvent(r *http.Request, event *gogithub.PullRequestEvent) error {
+	if event.GetAction() != "closed" || !event.GetPullRequest().GetMerged() {
+		return nil
+	}
+
+	repo := event.GetRepo()
+	owner := repo.GetOwner().GetLogin()
+	repoName := repo.GetName()
+	prNumber := event.GetPullRequest().GetNumber()
+
+	task, err := s.store.GetTaskByPRNumber(r.Context(), owner, repoName, prNumber)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil // not our PR
+		}
+		return fmt.Errorf("looking up task by PR number: %w", err)
+	}
+
+	if task.GithubIssue == nil {
+		return nil
+	}
+
+	s.logger.Info("closing issue after PR merge",
+		"owner", owner, "repo", repoName, "pr", prNumber, "issue", *task.GithubIssue)
+
+	state := "closed"
+	_, _, err = s.githubClient.Issues.Edit(r.Context(), owner, repoName, *task.GithubIssue,
+		&gogithub.IssueRequest{State: &state})
+	if err != nil {
+		return fmt.Errorf("closing issue %d: %w", *task.GithubIssue, err)
 	}
 
 	return nil
