@@ -148,6 +148,9 @@ func TestCreateTask_Success(t *testing.T) {
 	if task.Title == nil || *task.Title != "Feature X" {
 		t.Fatalf("expected title 'Feature X', got %v", task.Title)
 	}
+	if task.Prompt != "Feature X\n\nimplement feature X" {
+		t.Fatalf("expected prompt to include title, got %q", task.Prompt)
+	}
 	if task.Status != "queued" {
 		t.Fatalf("expected status 'queued', got %q", task.Status)
 	}
@@ -159,6 +162,32 @@ func TestCreateTask_Success(t *testing.T) {
 	}
 	if task.SessionID == "" {
 		t.Fatal("expected session_id to be set")
+	}
+}
+
+func TestCreateTask_NoTitle_PromptUnchanged(t *testing.T) {
+	srv, s := testServer(t)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
+
+	body := `{"prompt": "implement feature X", "repo_url": "https://github.com/test/repo"}`
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var task store.Task
+	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+		t.Fatal(err)
+	}
+	if task.Prompt != "implement feature X" {
+		t.Fatalf("expected prompt unchanged without title, got %q", task.Prompt)
 	}
 }
 

@@ -51,8 +51,13 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		req.BaseBranch = "main"
 	}
 
+	prompt := req.Prompt
+	if req.Title != "" {
+		prompt = req.Title + "\n\n" + req.Prompt
+	}
+
 	task := &store.Task{
-		Prompt:     req.Prompt,
+		Prompt:     prompt,
 		RepoURL:    strings.TrimSuffix(req.RepoURL, ".git"),
 		BaseBranch: req.BaseBranch,
 		SourceType: "api",
