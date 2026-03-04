@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import type { Task, WSEvent } from "@/types/api"
-import { getTask } from "@/api/client"
+import { getTask, cancelTask } from "@/api/client"
 import { StatusBadge } from "@/components/StatusBadge"
 import { TimeAgo } from "@/components/TimeAgo"
 import { PlanView } from "@/components/PlanView"
 import { ApprovalForm } from "@/components/ApprovalForm"
 import { LogViewer } from "@/components/LogViewer"
+import { Button } from "@/components/ui/button"
 import { useLogStream } from "@/hooks/useLogStream"
 
 interface TaskDetailProps {
@@ -17,6 +18,7 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
   const { id } = useParams<{ id: string }>()
   const [task, setTask] = useState<Task | null>(null)
   const [loading, setLoading] = useState(true)
+  const [cancelling, setCancelling] = useState(false)
   const { lines, done } = useLogStream(id)
 
   const fetchTask = useCallback(async () => {
@@ -74,6 +76,24 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
             {task.workspace_id && <span>Workspace: {task.workspace_id}</span>}
           </div>
         </div>
+        {["queued", "planning", "awaiting_approval", "implementing"].includes(task.status) && (
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={cancelling}
+            onClick={async () => {
+              setCancelling(true)
+              try {
+                const updated = await cancelTask(task.id)
+                setTask(updated)
+              } finally {
+                setCancelling(false)
+              }
+            }}
+          >
+            {cancelling ? "Cancelling..." : "Cancel Task"}
+          </Button>
+        )}
       </div>
 
       {task.pr_url && (

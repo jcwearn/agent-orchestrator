@@ -86,6 +86,7 @@ func (s *Server) Routes() chi.Router {
 			r.Delete("/tasks/{id}", s.handleDeleteTask)
 			r.Post("/tasks/{id}/approve", s.handleApproveTask)
 			r.Post("/tasks/{id}/feedback", s.handleFeedbackTask)
+			r.Post("/tasks/{id}/cancel", s.handleCancelTask)
 			r.Get("/tasks/{id}/logs", s.handleStreamLogs)
 
 			r.Get("/agents", s.handleListAgents)

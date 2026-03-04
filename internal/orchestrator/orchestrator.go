@@ -35,6 +35,7 @@ type Config struct {
 	AgentReadyTimeout      time.Duration // max wait for agent lifecycle "ready" (default 2m)
 	AgentReadyPollInterval time.Duration // poll interval for agent readiness (default 5s)
 	PlanRetries            int           // retries on empty plan output (default 1; total attempts = 1 + PlanRetries)
+	ApprovalTimeout        time.Duration // max age before awaiting_approval tasks are auto-cancelled (default 24h)
 	OnEvent                func(taskID, eventType string)
 	Notifier               Notifier
 }
@@ -47,17 +48,20 @@ func DefaultConfig() Config {
 		AgentReadyTimeout:      2 * time.Minute,
 		AgentReadyPollInterval: 5 * time.Second,
 		PlanRetries:            1,
+		ApprovalTimeout:        24 * time.Hour,
 	}
 }
 
 // Orchestrator polls for queued tasks, assigns workspaces, and drives them
 // through the plan → approval → implement lifecycle.
 type Orchestrator struct {
-	store    *store.Store
-	executor coder.WorkspaceExecutor
-	pool     *coder.Pool
-	logger   *slog.Logger
-	config   Config
+	store              *store.Store
+	executor           coder.WorkspaceExecutor
+	pool               *coder.Pool
+	logger             *slog.Logger
+	config             Config
+	rateLimitReset     time.Time
+	approvalCheckIndex int
 }
 
 // New creates an Orchestrator.
@@ -138,52 +142,95 @@ func (o *Orchestrator) tick(ctx context.Context) error {
 // processApprovedTasks finds awaiting_approval tasks that have been approved
 // and starts the implementation step for each.
 func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
+	// Rate limit backoff: skip all API calls until the reset time.
+	if !o.rateLimitReset.IsZero() && time.Now().Before(o.rateLimitReset) {
+		return nil
+	}
+
 	tasks, err := o.store.ListTasks(ctx, StatusAwaitingApproval)
 	if err != nil {
 		return err
 	}
 
+	approvalTimeout := o.config.ApprovalTimeout
+	if approvalTimeout == 0 {
+		approvalTimeout = 24 * time.Hour
+	}
+
+	// First pass: expire stale tasks, collect already-approved and unapproved GitHub tasks.
+	var approved []*store.Task
+	var needsCheck []*store.Task
 	for i := range tasks {
 		t := &tasks[i]
 
-		// For unapproved GitHub tasks with a plan comment, poll GitHub for approval.
-		if !isApproved(t) && o.isGitHubTask(t) && t.PlanCommentID != nil {
-			result, err := o.config.Notifier.CheckApproval(ctx, *t.GithubOwner, *t.GithubRepo, *t.GithubIssue, int64(*t.PlanCommentID))
-			if err != nil {
-				o.logger.Error("check approval", "task_id", t.ID, "error", err)
-				continue
+		// Expire stale tasks that have been awaiting approval too long.
+		if time.Since(t.CreatedAt) > approvalTimeout {
+			o.logger.Info("expiring stale task", "task_id", t.ID, "age", time.Since(t.CreatedAt))
+			t.Status = StatusCancelled
+			now := time.Now().UTC()
+			t.CompletedAt = &now
+			msg := "Cancelled: approval timeout exceeded"
+			t.ErrorMessage = &msg
+			if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
+				o.logger.Error("expire stale task", "task_id", t.ID, "error", err)
 			}
-			if result.Approved {
-				t.PlanFeedback = &approvedValue
-				t.RunTests = result.RunTests
-				if result.Decisions != "" {
-					t.Decisions = &result.Decisions
+			o.publishEvent(t.ID, "task.updated")
+			if o.isGitHubTask(t) {
+				if err := o.config.Notifier.NotifyFailed(ctx, *t.GithubOwner, *t.GithubRepo, *t.GithubIssue, "Task cancelled: approval timeout exceeded"); err != nil {
+					o.logger.Error("notify stale task expired", "task_id", t.ID, "error", err)
 				}
-				if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
-					o.logger.Error("update task after github approval", "task_id", t.ID, "error", err)
-					continue
-				}
-				o.publishEvent(t.ID, "task.updated")
-			} else if result.Feedback != "" {
-				t.PlanFeedback = &result.Feedback
-				t.PlanRevision++
-				if result.Decisions != "" {
-					t.Decisions = &result.Decisions
-				}
-				if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
-					o.logger.Error("update task with github feedback", "task_id", t.ID, "error", err)
-				}
-				o.publishEvent(t.ID, "task.updated")
-				continue
-			} else {
-				continue
 			}
-		}
-
-		if !isApproved(t) {
 			continue
 		}
 
+		if isApproved(t) {
+			approved = append(approved, t)
+		} else if o.isGitHubTask(t) && t.PlanCommentID != nil {
+			needsCheck = append(needsCheck, t)
+		}
+	}
+
+	// Round-robin: check only one unapproved GitHub task per tick.
+	if len(needsCheck) > 0 {
+		idx := o.approvalCheckIndex % len(needsCheck)
+		o.approvalCheckIndex++
+		t := needsCheck[idx]
+
+		result, err := o.config.Notifier.CheckApproval(ctx, *t.GithubOwner, *t.GithubRepo, *t.GithubIssue, int64(*t.PlanCommentID))
+		if err != nil {
+			if resetAt, ok := isRateLimitError(err); ok {
+				o.logger.Warn("rate limited by GitHub, backing off", "reset_at", resetAt)
+				o.rateLimitReset = resetAt
+				return nil
+			}
+			o.logger.Error("check approval", "task_id", t.ID, "error", err)
+		} else if result.Approved {
+			t.PlanFeedback = &approvedValue
+			t.RunTests = result.RunTests
+			if result.Decisions != "" {
+				t.Decisions = &result.Decisions
+			}
+			if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
+				o.logger.Error("update task after github approval", "task_id", t.ID, "error", err)
+			} else {
+				o.publishEvent(t.ID, "task.updated")
+				approved = append(approved, t)
+			}
+		} else if result.Feedback != "" {
+			t.PlanFeedback = &result.Feedback
+			t.PlanRevision++
+			if result.Decisions != "" {
+				t.Decisions = &result.Decisions
+			}
+			if err := o.store.UpdateTask(ctx, t.ID, t); err != nil {
+				o.logger.Error("update task with github feedback", "task_id", t.ID, "error", err)
+			}
+			o.publishEvent(t.ID, "task.updated")
+		}
+	}
+
+	// Launch implementation for approved tasks.
+	for _, t := range approved {
 		workspace, err := o.pool.Acquire(t.ID)
 		if err != nil {
 			o.logger.Debug("no workspace for approved task", "task_id", t.ID)
@@ -265,6 +312,14 @@ func (o *Orchestrator) runTask(ctx context.Context, task *store.Task, workspace 
 		}
 	}
 
+	// Check if task was cancelled while planning.
+	latest, err := o.store.GetTask(ctx, task.ID)
+	if err == nil && latest.Status == StatusCancelled {
+		o.logger.Info("task cancelled during planning", "task_id", task.ID)
+		o.stopAndRelease(ctx, workspace)
+		return
+	}
+
 	task.Status = StatusAwaitingApproval
 	task.WorkspaceID = nil
 	if err := o.store.UpdateTask(ctx, task.ID, task); err != nil {
@@ -297,6 +352,14 @@ func (o *Orchestrator) runImplement(ctx context.Context, task *store.Task, works
 
 	if err := o.stepImplement(ctx, task, workspace); err != nil {
 		o.failTask(ctx, task, workspace, err)
+		return
+	}
+
+	// Check if task was cancelled while implementing.
+	latest, err := o.store.GetTask(ctx, task.ID)
+	if err == nil && latest.Status == StatusCancelled {
+		o.logger.Info("task cancelled during implementation", "task_id", task.ID)
+		o.stopAndRelease(ctx, workspace)
 		return
 	}
 

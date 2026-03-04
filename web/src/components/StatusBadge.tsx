@@ -26,6 +26,10 @@ const statusConfig: Record<string, { label: string; className: string }> = {
     label: "Failed",
     className: "bg-red-500/20 text-red-400 hover:bg-red-500/20",
   },
+  cancelled: {
+    label: "Cancelled",
+    className: "bg-orange-500/20 text-orange-400 hover:bg-orange-500/20",
+  },
   stopped: {
     label: "Stopped",
     className: "bg-zinc-700 text-zinc-300 hover:bg-zinc-700",

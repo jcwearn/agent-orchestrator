@@ -100,6 +100,10 @@ export function sendFeedback(
   })
 }
 
+export function cancelTask(id: string): Promise<Task> {
+  return request<Task>(`/tasks/${id}/cancel`, { method: "POST" })
+}
+
 export function listAgents(): Promise<AgentInfo[]> {
   return request<AgentInfo[]>("/agents")
 }
