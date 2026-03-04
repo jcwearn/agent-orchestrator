@@ -100,6 +100,8 @@ func main() {
 		logger.Info("github integration enabled", "app_id", parsedAppID, "installation_id", parsedInstallationID)
 	}
 
+	srv := server.New(s, pool, exec, hub, logger, serverOpts...)
+
 	orchConfig := orchestrator.DefaultConfig()
 	orchConfig.OnEvent = func(taskID, eventType string) {
 		task, err := s.GetTask(ctx, taskID)
@@ -108,6 +110,12 @@ func main() {
 			return
 		}
 		hub.Broadcast(server.Event{Type: eventType, TaskID: taskID, Data: task})
+	}
+	orchConfig.OnAgentEvent = func() {
+		go func() {
+			agents := srv.BuildAgentList(ctx)
+			hub.Broadcast(server.Event{Type: "agent.updated", Agents: agents})
+		}()
 	}
 
 	// Wire notifier adapter if GitHub is configured.
@@ -138,8 +146,6 @@ func main() {
 			logger.Error("orchestrator error", "error", err)
 		}
 	}()
-
-	srv := server.New(s, pool, exec, hub, logger, serverOpts...)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

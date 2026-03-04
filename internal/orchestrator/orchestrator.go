@@ -38,6 +38,7 @@ type Config struct {
 	PlanRetries            int           // retries on empty plan output (default 1; total attempts = 1 + PlanRetries)
 	ApprovalTimeout        time.Duration // max age before awaiting_approval tasks are auto-cancelled (default 24h)
 	OnEvent                func(taskID, eventType string)
+	OnAgentEvent           func()
 	Notifier               Notifier
 }
 
@@ -311,6 +312,12 @@ func (o *Orchestrator) processApprovedTasks(ctx context.Context) error {
 func (o *Orchestrator) publishEvent(taskID, eventType string) {
 	if o.config.OnEvent != nil {
 		o.config.OnEvent(taskID, eventType)
+	}
+}
+
+func (o *Orchestrator) publishAgentEvent() {
+	if o.config.OnAgentEvent != nil {
+		o.config.OnAgentEvent()
 	}
 }
 

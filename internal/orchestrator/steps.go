@@ -176,6 +176,7 @@ func (o *Orchestrator) startWorkspace(ctx context.Context, task *store.Task, wor
 	}
 	ws := workspace
 	task.WorkspaceID = &ws
+	o.publishAgentEvent()
 	return nil
 }
 
@@ -236,6 +237,7 @@ func (o *Orchestrator) stopAndRelease(ctx context.Context, workspace string) {
 	if err := o.pool.Release(workspace); err != nil {
 		o.logger.Error("release workspace", "workspace", workspace, "error", err)
 	}
+	o.publishAgentEvent()
 }
 
 // failTask marks the task as failed, records the error, and releases the workspace.

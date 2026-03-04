@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"sort"
 )
@@ -13,10 +14,17 @@ type AgentInfo struct {
 }
 
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	agents := s.BuildAgentList(r.Context())
+	writeJSON(w, http.StatusOK, agents)
+}
+
+// BuildAgentList constructs the current agent list with workspace status and task info.
+// Exported so the event callback in main.go can reuse it.
+func (s *Server) BuildAgentList(ctx context.Context) []AgentInfo {
 	slots := s.pool.Status()
 
 	statusMap := make(map[string]string)
-	workspaces, err := s.executor.ListWorkspaces(r.Context())
+	workspaces, err := s.executor.ListWorkspaces(ctx)
 	if err != nil {
 		s.logger.Warn("list workspaces for agents", "error", err)
 	} else {
@@ -33,7 +41,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			WorkspaceStatus: statusMap[slot.Name],
 		}
 		if slot.TaskID != "" {
-			if task, err := s.store.GetTask(r.Context(), slot.TaskID); err == nil && task.Title != nil {
+			if task, err := s.store.GetTask(ctx, slot.TaskID); err == nil && task.Title != nil {
 				info.TaskTitle = *task.Title
 			}
 		}
@@ -48,7 +56,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		return agents[i].Name < agents[j].Name
 	})
 
-	writeJSON(w, http.StatusOK, agents)
+	return agents
 }
 
 func statusPriority(status string) int {

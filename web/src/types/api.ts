@@ -46,6 +46,7 @@ export interface WSEvent {
   type: string
   task_id: string
   data?: Task
+  agents?: AgentInfo[]
 }
 
 export interface CreateTaskRequest {
