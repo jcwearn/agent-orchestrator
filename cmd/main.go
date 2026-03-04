@@ -112,8 +112,10 @@ func main() {
 		hub.Broadcast(server.Event{Type: eventType, TaskID: taskID, Data: task})
 	}
 	orchConfig.OnAgentEvent = func() {
-		agents := srv.BuildAgentList(ctx)
-		hub.Broadcast(server.Event{Type: "agent.updated", Agents: agents})
+		go func() {
+			agents := srv.BuildAgentList(ctx)
+			hub.Broadcast(server.Event{Type: "agent.updated", Agents: agents})
+		}()
 	}
 
 	// Wire notifier adapter if GitHub is configured.
