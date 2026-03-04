@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1373,5 +1374,82 @@ func TestProcessApprovedTasks_GitHubFeedbackPreservesDecisions(t *testing.T) {
 	}
 	if updated.Decisions == nil || *updated.Decisions != "- [x] SQLite" {
 		t.Fatalf("expected decisions preserved, got %v", updated.Decisions)
+	}
+}
+
+func TestStepPlan_RetryOnEmptyOutput(t *testing.T) {
+	exec := newMockExecutor()
+
+	var claudeCalls atomic.Int32
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		if strings.Contains(command, "test -d") {
+			return &coder.SSHResult{ExitCode: 0}, nil
+		}
+		// First claude call returns empty, second returns real output.
+		n := claudeCalls.Add(1)
+		if n == 1 {
+			return &coder.SSHResult{ExitCode: 0}, nil
+		}
+		_, _ = fmt.Fprint(stdout, "the generated plan")
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	s := testStore(t)
+	pool := coder.NewPool(coder.DefaultWorkspaces)
+	o := New(s, exec, pool, slog.Default(), Config{
+		TickInterval:           50 * time.Millisecond,
+		VerifyRetryDelay:       10 * time.Millisecond,
+		AgentReadyTimeout:      2 * time.Second,
+		AgentReadyPollInterval: 10 * time.Millisecond,
+		PlanRetries:            1,
+	})
+
+	ctx := context.Background()
+	task := createTask(t, s, "retry plan")
+
+	err := o.stepPlan(ctx, task, "ws-1")
+	if err != nil {
+		t.Fatalf("expected stepPlan to succeed after retry, got: %v", err)
+	}
+	if task.Plan == nil || *task.Plan != "the generated plan" {
+		t.Fatalf("expected plan to be set, got: %v", task.Plan)
+	}
+	if claudeCalls.Load() != 2 {
+		t.Fatalf("expected 2 claude SSH calls, got %d", claudeCalls.Load())
+	}
+}
+
+func TestStepPlan_FailsAfterMaxRetries(t *testing.T) {
+	exec := newMockExecutor()
+	exec.sshFunc = func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error) {
+		if strings.Contains(command, "test -d") {
+			return &coder.SSHResult{ExitCode: 0}, nil
+		}
+		// Always return empty output.
+		return &coder.SSHResult{ExitCode: 0}, nil
+	}
+
+	s := testStore(t)
+	pool := coder.NewPool(coder.DefaultWorkspaces)
+	o := New(s, exec, pool, slog.Default(), Config{
+		TickInterval:           50 * time.Millisecond,
+		VerifyRetryDelay:       10 * time.Millisecond,
+		AgentReadyTimeout:      2 * time.Second,
+		AgentReadyPollInterval: 10 * time.Millisecond,
+		PlanRetries:            1,
+	})
+
+	ctx := context.Background()
+	task := createTask(t, s, "fail plan")
+
+	err := o.stepPlan(ctx, task, "ws-1")
+	if err == nil {
+		t.Fatal("expected stepPlan to fail after max retries")
+	}
+	if !strings.Contains(err.Error(), "empty output after 2 attempts") {
+		t.Fatalf("expected empty output error, got: %v", err)
+	}
+	if task.Plan != nil {
+		t.Fatalf("expected plan to remain nil, got: %v", *task.Plan)
 	}
 }

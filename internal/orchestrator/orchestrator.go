@@ -33,6 +33,7 @@ type Config struct {
 	VerifyRetryDelay       time.Duration // delay between verifyRepoDir retries (default 5s)
 	AgentReadyTimeout      time.Duration // max wait for agent lifecycle "ready" (default 2m)
 	AgentReadyPollInterval time.Duration // poll interval for agent readiness (default 5s)
+	PlanRetries            int           // retries on empty plan output (default 1; total attempts = 1 + PlanRetries)
 	OnEvent                func(taskID, eventType string)
 	Notifier               Notifier
 }
@@ -44,6 +45,7 @@ func DefaultConfig() Config {
 		VerifyRetryDelay:       5 * time.Second,
 		AgentReadyTimeout:      2 * time.Minute,
 		AgentReadyPollInterval: 5 * time.Second,
+		PlanRetries:            1,
 	}
 }
 
