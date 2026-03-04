@@ -1520,3 +1520,54 @@ func TestStepPlan_FailsAfterMaxRetries(t *testing.T) {
 		t.Fatalf("expected plan to remain nil, got: %v", *task.Plan)
 	}
 }
+
+func TestIsGitHubTask_APITaskWithGitHubMetadata(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	o, _ := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+
+	// API-sourced task with GitHub metadata (created via UI with create_issue).
+	task := &store.Task{
+		SourceType:  "api",
+		GithubOwner: strPtr("owner"),
+		GithubRepo:  strPtr("repo"),
+		GithubIssue: intPtr(42),
+	}
+
+	if !o.isGitHubTask(task) {
+		t.Fatal("expected isGitHubTask to return true for API task with GitHub metadata")
+	}
+}
+
+func TestIsGitHubTask_APITaskWithoutGitHubMetadata(t *testing.T) {
+	exec := newMockExecutor()
+	notifier := newMockNotifier()
+	o, _ := testOrchestrator(t, exec, nil)
+	o.config.Notifier = notifier
+
+	task := &store.Task{
+		SourceType: "api",
+	}
+
+	if o.isGitHubTask(task) {
+		t.Fatal("expected isGitHubTask to return false for API task without GitHub metadata")
+	}
+}
+
+func TestIsGitHubTask_NoNotifier(t *testing.T) {
+	exec := newMockExecutor()
+	o, _ := testOrchestrator(t, exec, nil)
+	// No notifier configured.
+
+	task := &store.Task{
+		SourceType:  "api",
+		GithubOwner: strPtr("owner"),
+		GithubRepo:  strPtr("repo"),
+		GithubIssue: intPtr(42),
+	}
+
+	if o.isGitHubTask(task) {
+		t.Fatal("expected isGitHubTask to return false when notifier is nil")
+	}
+}

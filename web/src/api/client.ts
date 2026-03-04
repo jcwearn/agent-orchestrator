@@ -1,6 +1,7 @@
 import type {
   AgentInfo,
   AuthStatus,
+  ConfigResponse,
   CreateTaskRequest,
   LoginRequest,
   SetupRequest,
@@ -51,6 +52,10 @@ export function setup(req: SetupRequest): Promise<AuthStatus> {
     method: "POST",
     body: JSON.stringify(req),
   })
+}
+
+export function getConfig(): Promise<ConfigResponse> {
+  return request<ConfigResponse>("/config")
 }
 
 export function listTasks(status?: string): Promise<Task[]> {

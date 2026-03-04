@@ -1,18 +1,24 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { createTask } from "@/api/client"
+import { createTask, getConfig } from "@/api/client"
 
 export function NewTask() {
   const navigate = useNavigate()
   const [prompt, setPrompt] = useState("")
   const [repoUrl, setRepoUrl] = useState("")
   const [baseBranch, setBaseBranch] = useState("main")
+  const [createIssue, setCreateIssue] = useState(false)
+  const [githubConfigured, setGithubConfigured] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+
+  useEffect(() => {
+    getConfig().then((c) => setGithubConfigured(c.github_configured)).catch(() => {})
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -24,6 +30,7 @@ export function NewTask() {
         prompt,
         repo_url: repoUrl,
         base_branch: baseBranch,
+        ...(createIssue && { create_issue: true }),
       })
       navigate(`/tasks/${task.id}`)
     } catch (err) {
@@ -70,6 +77,19 @@ export function NewTask() {
             className="bg-zinc-950 border-zinc-700"
           />
         </div>
+
+        {githubConfigured && (
+          <div className="flex items-center gap-2">
+            <input
+              id="create_issue"
+              type="checkbox"
+              checked={createIssue}
+              onChange={(e) => setCreateIssue(e.target.checked)}
+              className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+            />
+            <Label htmlFor="create_issue">Create GitHub issue</Label>
+          </div>
+        )}
 
         {error && (
           <p className="text-sm text-red-400">{error}</p>

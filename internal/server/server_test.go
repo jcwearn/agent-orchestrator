@@ -961,3 +961,105 @@ func TestCreateTask_InvalidJSON(t *testing.T) {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
+
+// --- create task with create_issue tests ---
+
+func TestCreateTask_WithCreateIssue(t *testing.T) {
+	var createdTitle, createdBody string
+	var createdLabels []string
+	ghMux := http.NewServeMux()
+	ghMux.HandleFunc("POST /api/v3/repos/testowner/testrepo/issues", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Title  string   `json:"title"`
+			Body   string   `json:"body"`
+			Labels []string `json:"labels"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		createdTitle = body.Title
+		createdBody = body.Body
+		createdLabels = body.Labels
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number": 99, "title": "` + body.Title + `"}`))
+	})
+	ghServer := httptest.NewServer(ghMux)
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHub(t, ghServer.URL)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
+
+	body := `{"prompt": "Add caching layer\n\nWe need Redis.", "repo_url": "https://github.com/testowner/testrepo", "create_issue": true}`
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var task store.Task
+	_ = json.NewDecoder(resp.Body).Decode(&task)
+	if task.GithubOwner == nil || *task.GithubOwner != "testowner" {
+		t.Fatalf("expected github_owner 'testowner', got %v", task.GithubOwner)
+	}
+	if task.GithubRepo == nil || *task.GithubRepo != "testrepo" {
+		t.Fatalf("expected github_repo 'testrepo', got %v", task.GithubRepo)
+	}
+	if task.GithubIssue == nil || *task.GithubIssue != 99 {
+		t.Fatalf("expected github_issue 99, got %v", task.GithubIssue)
+	}
+	if task.SourceType != "api" {
+		t.Fatalf("expected source_type 'api', got %q", task.SourceType)
+	}
+	if createdTitle != "Add caching layer" {
+		t.Fatalf("expected issue title 'Add caching layer', got %q", createdTitle)
+	}
+	if createdBody != "We need Redis." {
+		t.Fatalf("expected issue body 'We need Redis.', got %q", createdBody)
+	}
+	if len(createdLabels) != 1 || createdLabels[0] != "ai-task" {
+		t.Fatalf("expected labels [ai-task], got %v", createdLabels)
+	}
+}
+
+func TestCreateTask_WithCreateIssue_NonGitHubURL(t *testing.T) {
+	ghServer := httptest.NewServer(http.NewServeMux())
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHub(t, ghServer.URL)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
+
+	body := `{"prompt": "do something", "repo_url": "https://gitlab.com/owner/repo", "create_issue": true}`
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestCreateTask_WithCreateIssue_GitHubNotConfigured(t *testing.T) {
+	srv, s := testServer(t)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
+
+	body := `{"prompt": "do something", "repo_url": "https://github.com/owner/repo", "create_issue": true}`
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}

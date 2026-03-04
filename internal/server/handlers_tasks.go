@@ -3,17 +3,22 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
+	gogithub "github.com/google/go-github/v83/github"
 	"github.com/google/uuid"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
 type CreateTaskRequest struct {
-	Prompt     string `json:"prompt"`
-	RepoURL    string `json:"repo_url"`
-	BaseBranch string `json:"base_branch"`
+	Prompt      string `json:"prompt"`
+	RepoURL     string `json:"repo_url"`
+	BaseBranch  string `json:"base_branch"`
+	CreateIssue bool   `json:"create_issue"`
 }
 
 type ApproveRequest struct {
@@ -51,6 +56,36 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		BaseBranch: req.BaseBranch,
 		SourceType: "api",
 		SessionID:  uuid.New().String(),
+	}
+
+	if req.CreateIssue {
+		if s.githubClient == nil {
+			writeError(w, http.StatusBadRequest, "GitHub integration not configured")
+			return
+		}
+
+		owner, repo, err := parseGitHubRepo(req.RepoURL)
+		if err != nil || owner == "" {
+			writeError(w, http.StatusBadRequest, "repo_url must be a valid GitHub repository URL")
+			return
+		}
+
+		title, body := splitPromptForIssue(req.Prompt)
+		issue, _, err := s.githubClient.Issues.Create(r.Context(), owner, repo, &gogithub.IssueRequest{
+			Title:  &title,
+			Body:   &body,
+			Labels: &[]string{aiTaskLabel},
+		})
+		if err != nil {
+			s.logger.Error("create github issue", "error", err)
+			writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to create GitHub issue: %v", err))
+			return
+		}
+
+		issueNumber := issue.GetNumber()
+		task.GithubOwner = &owner
+		task.GithubRepo = &repo
+		task.GithubIssue = &issueNumber
 	}
 
 	if err := s.store.CreateTask(r.Context(), task); err != nil {
@@ -197,4 +232,34 @@ func (s *Server) handleFeedbackTask(w http.ResponseWriter, r *http.Request) {
 
 	s.hub.Broadcast(Event{Type: "task.updated", TaskID: task.ID, Data: task})
 	writeJSON(w, http.StatusOK, task)
+}
+
+// parseGitHubRepo extracts owner and repo from a GitHub URL.
+// Returns empty strings (no error) for non-GitHub hosts.
+func parseGitHubRepo(repoURL string) (owner, repo string, err error) {
+	u, err := url.Parse(repoURL)
+	if err != nil {
+		return "", "", err
+	}
+	if u.Host != "github.com" {
+		return "", "", nil
+	}
+	path := strings.TrimPrefix(u.Path, "/")
+	path = strings.TrimSuffix(path, ".git")
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid GitHub repo path: %s", u.Path)
+	}
+	return parts[0], parts[1], nil
+}
+
+// splitPromptForIssue splits a prompt into title (first line, max 256 chars)
+// and body (remainder).
+func splitPromptForIssue(prompt string) (title, body string) {
+	title, body, _ = strings.Cut(prompt, "\n")
+	if len(title) > 256 {
+		title = title[:256]
+	}
+	body = strings.TrimSpace(body)
+	return title, body
 }
