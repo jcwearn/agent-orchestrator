@@ -5,7 +5,7 @@ import { listAgents } from "@/api/client"
 export function useAgents(subscribe: (fn: (e: WSEvent) => void) => () => void) {
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const intervalRef = useRef<ReturnType<typeof setInterval>>()
+  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
   const fetchAgents = useCallback(async () => {
     try {
