@@ -186,6 +186,30 @@ func TestCreateTask_CustomBaseBranch(t *testing.T) {
 	}
 }
 
+func TestCreateTask_StripsGitSuffix(t *testing.T) {
+	srv, s := testServer(t)
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+	client := authenticatedClient(t, s, ts.URL)
+
+	body := `{"prompt": "fix bug", "repo_url": "https://github.com/test/repo.git"}`
+	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var task store.Task
+	_ = json.NewDecoder(resp.Body).Decode(&task)
+	if task.RepoURL != "https://github.com/test/repo" {
+		t.Fatalf("expected repo_url without .git suffix, got %q", task.RepoURL)
+	}
+}
+
 func TestCreateTask_MissingPrompt(t *testing.T) {
 	srv, s := testServer(t)
 	ts := httptest.NewServer(srv.Routes())
