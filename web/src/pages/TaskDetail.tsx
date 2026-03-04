@@ -30,6 +30,7 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
   const [task, setTask] = useState<Task | null>(null)
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState("")
   const { lines, done } = useLogStream(id)
 
   const fetchTask = useCallback(async () => {
@@ -107,9 +108,14 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   onClick={async () => {
                     setCancelling(true)
+                    setCancelError("")
                     try {
                       const updated = await cancelTask(task.id)
                       setTask(updated)
+                    } catch (err) {
+                      setCancelError(
+                        err instanceof Error ? err.message : "Failed to cancel task",
+                      )
                     } finally {
                       setCancelling(false)
                     }
@@ -120,6 +126,9 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+        )}
+        {cancelError && (
+          <p className="text-sm text-red-400">{cancelError}</p>
         )}
       </div>
 
