@@ -106,7 +106,7 @@ func TestListRepos_GitHubAPIError(t *testing.T) {
 	ghMux := http.NewServeMux()
 	ghMux.HandleFunc("GET /api/v3/installation/repositories", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintln(w, `{"message":"internal error"}`)
+		_, _ = fmt.Fprintln(w, `{"message":"internal error"}`)
 	})
 	ghServer := httptest.NewServer(ghMux)
 	defer ghServer.Close()
