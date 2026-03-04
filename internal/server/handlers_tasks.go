@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	gogithub "github.com/google/go-github/v83/github"
@@ -78,7 +79,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			s.logger.Error("create github issue", "error", err)
-			writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to create GitHub issue: %v", err))
+			writeError(w, http.StatusBadGateway, "failed to create GitHub issue")
 			return
 		}
 
@@ -259,6 +260,9 @@ func splitPromptForIssue(prompt string) (title, body string) {
 	title, body, _ = strings.Cut(prompt, "\n")
 	if len(title) > 256 {
 		title = title[:256]
+		for !utf8.ValidString(title) {
+			title = title[:len(title)-1]
+		}
 	}
 	body = strings.TrimSpace(body)
 	return title, body

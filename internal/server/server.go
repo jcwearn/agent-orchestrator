@@ -64,14 +64,13 @@ func (s *Server) Routes() chi.Router {
 		r.Post("/auth/setup", s.handleSetup)
 		r.Post("/auth/login", s.handleLogin)
 		r.Post("/auth/logout", s.handleLogout)
-		r.Get("/config", s.handleGetConfig)
-
 		// Webhook (has its own HMAC validation)
 		r.Post("/webhooks/github", s.handleGitHubWebhook)
 
 		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Get("/config", s.handleGetConfig)
 			r.Post("/tasks", s.handleCreateTask)
 			r.Get("/tasks", s.handleListTasks)
 			r.Get("/tasks/{id}", s.handleGetTask)
