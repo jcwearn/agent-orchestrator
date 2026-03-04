@@ -8,6 +8,17 @@ import { PlanView } from "@/components/PlanView"
 import { ApprovalForm } from "@/components/ApprovalForm"
 import { LogViewer } from "@/components/LogViewer"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { useLogStream } from "@/hooks/useLogStream"
 
 interface TaskDetailProps {
@@ -19,6 +30,7 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
   const [task, setTask] = useState<Task | null>(null)
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState("")
   const { lines, done } = useLogStream(id)
 
   const fetchTask = useCallback(async () => {
@@ -77,22 +89,46 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
           </div>
         </div>
         {["queued", "planning", "awaiting_approval", "implementing"].includes(task.status) && (
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={cancelling}
-            onClick={async () => {
-              setCancelling(true)
-              try {
-                const updated = await cancelTask(task.id)
-                setTask(updated)
-              } finally {
-                setCancelling(false)
-              }
-            }}
-          >
-            {cancelling ? "Cancelling..." : "Cancel Task"}
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" disabled={cancelling}>
+                {cancelling ? "Cancelling..." : "Cancel Task"}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Cancel task?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will stop the task. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep running</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={async () => {
+                    setCancelling(true)
+                    setCancelError("")
+                    try {
+                      const updated = await cancelTask(task.id)
+                      setTask(updated)
+                    } catch (err) {
+                      setCancelError(
+                        err instanceof Error ? err.message : "Failed to cancel task",
+                      )
+                    } finally {
+                      setCancelling(false)
+                    }
+                  }}
+                >
+                  Cancel task
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+        {cancelError && (
+          <p className="text-sm text-red-400">{cancelError}</p>
         )}
       </div>
 
