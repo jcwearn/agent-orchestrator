@@ -8,6 +8,17 @@ import { PlanView } from "@/components/PlanView"
 import { ApprovalForm } from "@/components/ApprovalForm"
 import { LogViewer } from "@/components/LogViewer"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { useLogStream } from "@/hooks/useLogStream"
 
 interface TaskDetailProps {
@@ -77,22 +88,38 @@ export function TaskDetail({ subscribe }: TaskDetailProps) {
           </div>
         </div>
         {["queued", "planning", "awaiting_approval", "implementing"].includes(task.status) && (
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={cancelling}
-            onClick={async () => {
-              setCancelling(true)
-              try {
-                const updated = await cancelTask(task.id)
-                setTask(updated)
-              } finally {
-                setCancelling(false)
-              }
-            }}
-          >
-            {cancelling ? "Cancelling..." : "Cancel Task"}
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" disabled={cancelling}>
+                {cancelling ? "Cancelling..." : "Cancel Task"}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Cancel task?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will stop the task. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep running</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={async () => {
+                    setCancelling(true)
+                    try {
+                      const updated = await cancelTask(task.id)
+                      setTask(updated)
+                    } finally {
+                      setCancelling(false)
+                    }
+                  }}
+                >
+                  Cancel task
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         )}
       </div>
 
