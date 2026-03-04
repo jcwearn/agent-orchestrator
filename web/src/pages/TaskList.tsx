@@ -33,7 +33,7 @@ export function TaskList({ subscribe }: TaskListProps) {
           <TableHeader>
             <TableRow className="border-zinc-800 hover:bg-transparent">
               <TableHead className="text-zinc-400">Status</TableHead>
-              <TableHead className="text-zinc-400">Prompt</TableHead>
+              <TableHead className="text-zinc-400">Title</TableHead>
               <TableHead className="text-zinc-400">Repository</TableHead>
               <TableHead className="text-zinc-400">Source</TableHead>
               <TableHead className="text-zinc-400">Created</TableHead>
@@ -67,9 +67,12 @@ export function TaskList({ subscribe }: TaskListProps) {
                     to={`/tasks/${task.id}`}
                     className="text-sm text-zinc-100 hover:text-sky-400"
                   >
-                    {task.prompt.length > 80
-                      ? task.prompt.slice(0, 80) + "..."
-                      : task.prompt}
+                    {(() => {
+                      const display = task.title ?? task.prompt
+                      return display.length > 80
+                        ? display.slice(0, 80) + "..."
+                        : display
+                    })()}
                   </Link>
                 </TableCell>
                 <TableCell className="text-sm text-zinc-400">

@@ -30,6 +30,9 @@ func TestGetConfig_WithoutGitHub(t *testing.T) {
 	if config.GitHubConfigured {
 		t.Fatal("expected github_configured to be false")
 	}
+	if config.AutoCreateIssues {
+		t.Fatal("expected auto_create_issues to be false by default")
+	}
 }
 
 func TestGetConfig_WithGitHub(t *testing.T) {

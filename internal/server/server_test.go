@@ -15,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	gogithub "github.com/google/go-github/v83/github"
 	"github.com/gorilla/websocket"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
+	ghclient "github.com/jcwearn/agent-orchestrator/internal/github"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -125,7 +127,7 @@ func TestCreateTask_Success(t *testing.T) {
 	defer ts.Close()
 	client := authenticatedClient(t, s, ts.URL)
 
-	body := `{"prompt": "implement feature X", "repo_url": "https://github.com/test/repo"}`
+	body := `{"title": "Feature X", "prompt": "implement feature X", "repo_url": "https://github.com/test/repo"}`
 	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -142,6 +144,9 @@ func TestCreateTask_Success(t *testing.T) {
 	}
 	if task.ID == "" {
 		t.Fatal("expected task ID")
+	}
+	if task.Title == nil || *task.Title != "Feature X" {
+		t.Fatalf("expected title 'Feature X', got %v", task.Title)
 	}
 	if task.Status != "queued" {
 		t.Fatalf("expected status 'queued', got %q", task.Status)
@@ -962,9 +967,27 @@ func TestCreateTask_InvalidJSON(t *testing.T) {
 	}
 }
 
-// --- create task with create_issue tests ---
+// --- auto-create issue tests ---
 
-func TestCreateTask_WithCreateIssue(t *testing.T) {
+func testServerWithGitHubAutoIssues(t *testing.T, ghServerURL string) (*Server, *store.Store) {
+	t.Helper()
+	s := testStore(t)
+	pool := coder.NewPool([]string{"agent-1", "agent-2"})
+	exec := &mockExecutor{}
+	hub := NewHub()
+
+	gc := gogithub.NewClient(nil)
+	gc, _ = gc.WithEnterpriseURLs(ghServerURL+"/", ghServerURL+"/")
+	client := &ghclient.Client{Client: gc}
+
+	srv := New(s, pool, exec, hub, slog.Default(),
+		WithGitHub(client, []byte(testWebhookSecret)),
+		WithAutoCreateIssues(true),
+	)
+	return srv, s
+}
+
+func TestCreateTask_AutoCreateIssue(t *testing.T) {
 	var createdTitle, createdBody string
 	var createdLabels []string
 	ghMux := http.NewServeMux()
@@ -984,12 +1007,12 @@ func TestCreateTask_WithCreateIssue(t *testing.T) {
 	ghServer := httptest.NewServer(ghMux)
 	defer ghServer.Close()
 
-	srv, s := testServerWithGitHub(t, ghServer.URL)
+	srv, s := testServerWithGitHubAutoIssues(t, ghServer.URL)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
 	client := authenticatedClient(t, s, ts.URL)
 
-	body := `{"prompt": "Add caching layer\n\nWe need Redis.", "repo_url": "https://github.com/testowner/testrepo", "create_issue": true}`
+	body := `{"title": "Add caching layer", "prompt": "We need Redis.", "repo_url": "https://github.com/testowner/testrepo"}`
 	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -1002,6 +1025,9 @@ func TestCreateTask_WithCreateIssue(t *testing.T) {
 
 	var task store.Task
 	_ = json.NewDecoder(resp.Body).Decode(&task)
+	if task.Title == nil || *task.Title != "Add caching layer" {
+		t.Fatalf("expected title 'Add caching layer', got %v", task.Title)
+	}
 	if task.GithubOwner == nil || *task.GithubOwner != "testowner" {
 		t.Fatalf("expected github_owner 'testowner', got %v", task.GithubOwner)
 	}
@@ -1025,41 +1051,58 @@ func TestCreateTask_WithCreateIssue(t *testing.T) {
 	}
 }
 
-func TestCreateTask_WithCreateIssue_NonGitHubURL(t *testing.T) {
+func TestCreateTask_AutoCreateIssue_Disabled(t *testing.T) {
 	ghServer := httptest.NewServer(http.NewServeMux())
 	defer ghServer.Close()
 
+	// Use testServerWithGitHub which does NOT set autoCreateIssues.
 	srv, s := testServerWithGitHub(t, ghServer.URL)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
 	client := authenticatedClient(t, s, ts.URL)
 
-	body := `{"prompt": "do something", "repo_url": "https://gitlab.com/owner/repo", "create_issue": true}`
+	body := `{"title": "test", "prompt": "do something", "repo_url": "https://github.com/owner/repo"}`
 	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var task store.Task
+	_ = json.NewDecoder(resp.Body).Decode(&task)
+	if task.GithubIssue != nil {
+		t.Fatalf("expected no github issue when auto-create disabled, got %v", task.GithubIssue)
 	}
 }
 
-func TestCreateTask_WithCreateIssue_GitHubNotConfigured(t *testing.T) {
-	srv, s := testServer(t)
+func TestCreateTask_AutoCreateIssue_NonGitHubURL(t *testing.T) {
+	ghServer := httptest.NewServer(http.NewServeMux())
+	defer ghServer.Close()
+
+	srv, s := testServerWithGitHubAutoIssues(t, ghServer.URL)
 	ts := httptest.NewServer(srv.Routes())
 	defer ts.Close()
 	client := authenticatedClient(t, s, ts.URL)
 
-	body := `{"prompt": "do something", "repo_url": "https://github.com/owner/repo", "create_issue": true}`
+	body := `{"title": "test", "prompt": "do something", "repo_url": "https://gitlab.com/owner/repo"}`
 	resp, err := client.Post(ts.URL+"/api/v1/tasks", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	// Should succeed — non-GitHub URL silently skips issue creation.
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var task store.Task
+	_ = json.NewDecoder(resp.Body).Decode(&task)
+	if task.GithubIssue != nil {
+		t.Fatalf("expected no github issue for non-GitHub URL, got %v", task.GithubIssue)
 	}
 }

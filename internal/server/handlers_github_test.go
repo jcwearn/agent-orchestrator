@@ -150,6 +150,9 @@ func TestGitHubWebhook_IssuesLabeled_CreatesTask(t *testing.T) {
 	}
 
 	task := tasks[0]
+	if task.Title == nil || *task.Title != "Add caching layer" {
+		t.Fatalf("expected title 'Add caching layer', got %v", task.Title)
+	}
 	if task.SourceType != "github" {
 		t.Fatalf("expected source_type 'github', got %q", task.SourceType)
 	}

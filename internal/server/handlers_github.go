@@ -108,7 +108,9 @@ func (s *Server) handleIssuesEvent(r *http.Request, event *gogithub.IssuesEvent)
 		baseBranch = "main"
 	}
 
+	issueTitle := issue.GetTitle()
 	task := &store.Task{
+		Title:       &issueTitle,
 		Prompt:      prompt,
 		RepoURL:     strings.TrimSuffix(repo.GetCloneURL(), ".git"),
 		BaseBranch:  baseBranch,

@@ -87,7 +87,7 @@ export function Dashboard({ subscribe }: DashboardProps) {
                         to={`/tasks/${agent.task_id}`}
                         className="text-sm text-sky-400 hover:underline"
                       >
-                        {agent.task_id.slice(0, 8)}...
+                        {agent.task_title || agent.task_id.slice(0, 8) + "..."}
                       </Link>
                     ) : (
                       <span className="text-sm text-zinc-500">Idle</span>
