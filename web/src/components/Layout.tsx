@@ -1,5 +1,6 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import type { AuthUser } from "@/types/api"
 
 const navLinks = [
@@ -50,12 +51,9 @@ export function Layout({ user, onLogout }: LayoutProps) {
             {user && (
               <div className="flex items-center gap-3 border-l border-zinc-800 pl-4">
                 <span className="text-sm text-zinc-400">{user.username}</span>
-                <button
-                  onClick={handleLogout}
-                  className="rounded-md px-2 py-1 text-sm text-zinc-400 transition-colors hover:text-zinc-100"
-                >
+                <Button variant="ghost" size="sm" onClick={handleLogout}>
                   Sign out
-                </button>
+                </Button>
               </div>
             )}
           </div>
