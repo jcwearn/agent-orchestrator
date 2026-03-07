@@ -1,5 +1,5 @@
 # Stage 1: Build web frontend
-FROM node:22-slim AS web-build
+FROM node:24-slim@sha256:e8e2e91b1378f83c5b2dd15f0247f34110e2fe895f6ca7719dbb780f929368eb AS web-build
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
