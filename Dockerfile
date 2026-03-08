@@ -18,7 +18,7 @@ COPY --from=web-build /app/web/dist/ web/dist/
 RUN CGO_ENABLED=0 go build -o /agent-orchestrator ./cmd/
 
 # Stage 3: Runtime
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
