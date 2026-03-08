@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	gogithub "github.com/google/go-github/v83/github"
+	gogithub "github.com/google/go-github/v84/github"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
@@ -22,14 +22,14 @@ import (
 // --- mock executor ---
 
 type mockExecutor struct {
-	mu          sync.Mutex
-	sshFunc     func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error)
-	startFunc   func(ctx context.Context, workspace string, params map[string]string) error
-	stopFunc    func(ctx context.Context, workspace string) error
-	listFunc    func(ctx context.Context) ([]coder.WorkspaceInfo, error)
-	sshCalls    []sshCall
-	startCalls  []string
-	stopCalls   []string
+	mu         sync.Mutex
+	sshFunc    func(ctx context.Context, workspace, command string, stdout, stderr io.Writer) (*coder.SSHResult, error)
+	startFunc  func(ctx context.Context, workspace string, params map[string]string) error
+	stopFunc   func(ctx context.Context, workspace string) error
+	listFunc   func(ctx context.Context) ([]coder.WorkspaceInfo, error)
+	sshCalls   []sshCall
+	startCalls []string
+	stopCalls  []string
 }
 
 type sshCall struct {
@@ -610,17 +610,17 @@ func TestMultipleTasksQueueing(t *testing.T) {
 // --- mock notifier ---
 
 type mockNotifier struct {
-	mu                      sync.Mutex
-	planReadyCalls          []string
-	checkCalls              []string
-	implStartedCalls        []string
-	planRevisionCalls       []string
-	completeCalls           []string
-	failedCalls             []string
-	linkPRCalls             []string
-	planReadyResult         int64
-	checkResult             ApprovalResult
-	checkErr                error
+	mu                sync.Mutex
+	planReadyCalls    []string
+	checkCalls        []string
+	implStartedCalls  []string
+	planRevisionCalls []string
+	completeCalls     []string
+	failedCalls       []string
+	linkPRCalls       []string
+	planReadyResult   int64
+	checkResult       ApprovalResult
+	checkErr          error
 }
 
 func newMockNotifier() *mockNotifier {
@@ -1185,10 +1185,10 @@ func TestWaitForAgentReady_Timeout(t *testing.T) {
 
 func TestExtractPRUrl(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantURL  string
-		wantNum  int
+		name    string
+		input   string
+		wantURL string
+		wantNum int
 	}{
 		{"empty", "", "", 0},
 		{"no match", "all done, pushed to origin", "", 0},
