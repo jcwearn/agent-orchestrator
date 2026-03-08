@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	gogithub "github.com/google/go-github/v83/github"
+	gogithub "github.com/google/go-github/v84/github"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
 
