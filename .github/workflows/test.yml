@@ -20,6 +20,11 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Verify lockfile is up to date
+        run: |
+          (cd web && npm install --package-lock-only --ignore-scripts)
+          git diff --exit-code web/package-lock.json || (echo "package-lock.json is out of sync with package.json — run npm install in web/" && exit 1)
+
       - name: Build frontend
         run: |
           cd web
