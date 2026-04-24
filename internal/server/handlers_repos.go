@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	gogithub "github.com/google/go-github/v84/github"
+	gogithub "github.com/google/go-github/v85/github"
 )
 
 type RepoInfo struct {
