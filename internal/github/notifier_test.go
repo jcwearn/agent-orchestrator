@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	gogithub "github.com/google/go-github/v84/github"
+	gogithub "github.com/google/go-github/v85/github"
 )
 
 // --- pure helper tests ---
