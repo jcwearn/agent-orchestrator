@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
-	gogithub "github.com/google/go-github/v85/github"
+	gogithub "github.com/google/go-github/v86/github"
 	"github.com/google/uuid"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )

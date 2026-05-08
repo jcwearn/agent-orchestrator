@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	gogithub "github.com/google/go-github/v85/github"
+	gogithub "github.com/google/go-github/v86/github"
 )
 
 // Notifier posts status updates to GitHub issues.
