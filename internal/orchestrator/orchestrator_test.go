@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	gogithub "github.com/google/go-github/v86/github"
+	gogithub "github.com/google/go-github/v88/github"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )

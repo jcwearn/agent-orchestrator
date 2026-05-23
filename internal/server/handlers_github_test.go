@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	gogithub "github.com/google/go-github/v86/github"
+	gogithub "github.com/google/go-github/v88/github"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
 	ghclient "github.com/jcwearn/agent-orchestrator/internal/github"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
@@ -27,8 +27,7 @@ func testServerWithGitHub(t *testing.T, ghServerURL string) (*Server, *store.Sto
 	exec := &mockExecutor{}
 	hub := NewHub()
 
-	gc := gogithub.NewClient(nil)
-	gc, _ = gc.WithEnterpriseURLs(ghServerURL+"/", ghServerURL+"/")
+	gc, _ := gogithub.NewClient(gogithub.WithEnterpriseURLs(ghServerURL+"/", ghServerURL+"/"))
 	client := &ghclient.Client{Client: gc}
 
 	srv := New(s, pool, exec, hub, slog.Default(), WithGitHub(client, []byte(testWebhookSecret)))
@@ -602,8 +601,7 @@ func testServerWithGitHubAndAllowedUsers(t *testing.T, ghServerURL string, users
 	exec := &mockExecutor{}
 	hub := NewHub()
 
-	gc := gogithub.NewClient(nil)
-	gc, _ = gc.WithEnterpriseURLs(ghServerURL+"/", ghServerURL+"/")
+	gc, _ := gogithub.NewClient(gogithub.WithEnterpriseURLs(ghServerURL+"/", ghServerURL+"/"))
 	client := &ghclient.Client{Client: gc}
 
 	srv := New(s, pool, exec, hub, slog.Default(), WithGitHub(client, []byte(testWebhookSecret)), WithAllowedUsers(users))

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	gogithub "github.com/google/go-github/v86/github"
+	gogithub "github.com/google/go-github/v88/github"
 	"github.com/gorilla/websocket"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
 	ghclient "github.com/jcwearn/agent-orchestrator/internal/github"
@@ -1029,8 +1029,7 @@ func testServerWithGitHubAutoIssues(t *testing.T, ghServerURL string) (*Server, 
 	exec := &mockExecutor{}
 	hub := NewHub()
 
-	gc := gogithub.NewClient(nil)
-	gc, _ = gc.WithEnterpriseURLs(ghServerURL+"/", ghServerURL+"/")
+	gc, _ := gogithub.NewClient(gogithub.WithEnterpriseURLs(ghServerURL+"/", ghServerURL+"/"))
 	client := &ghclient.Client{Client: gc}
 
 	srv := New(s, pool, exec, hub, slog.Default(),
