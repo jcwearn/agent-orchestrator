@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	gogithub "github.com/google/go-github/v86/github"
+	gogithub "github.com/google/go-github/v88/github"
 )
 
 // --- pure helper tests ---
@@ -242,8 +242,7 @@ func newFakeGitHub() (*httptest.Server, *fakeGitHub) {
 
 func testNotifier(t *testing.T, serverURL string) *Notifier {
 	t.Helper()
-	gc := gogithub.NewClient(nil)
-	gc, _ = gc.WithEnterpriseURLs(serverURL+"/", serverURL+"/")
+	gc, _ := gogithub.NewClient(gogithub.WithEnterpriseURLs(serverURL+"/", serverURL+"/"))
 	client := &Client{Client: gc}
 	return NewNotifier(client, slog.Default())
 }

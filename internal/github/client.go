@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
-	gogithub "github.com/google/go-github/v86/github"
+	gogithub "github.com/google/go-github/v88/github"
 )
 
 // Client wraps the GitHub API client with App authentication.
@@ -23,7 +23,10 @@ func NewClient(appID, installationID int64, privateKey []byte) (*Client, error) 
 		return nil, err
 	}
 
-	gc := gogithub.NewClient(&http.Client{Transport: transport})
+	gc, err := gogithub.NewClient(gogithub.WithHTTPClient(&http.Client{Transport: transport}))
+	if err != nil {
+		return nil, err
+	}
 
 	return &Client{
 		Client:         gc,
