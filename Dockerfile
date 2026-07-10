@@ -1,5 +1,5 @@
 # Stage 1: Build web frontend
-FROM node:24-slim@sha256:b31e7a42fdf8b8aa5f5ed477c72d694301273f1069c5a2f71d53c6482e99a2fc AS web-build
+FROM node:24-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5 AS web-build
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # Stage 2: Build Go binary
-FROM golang:1.26@sha256:f96cc555eb8db430159a3aa6797cd5bae561945b7b0fe7d0e284c63a3b291609 AS go-build
+FROM golang:1.26@sha256:079e59808d2d252516e27e3f3a9c003740dee7f75e55aa71528766d52bcfc16a AS go-build
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
