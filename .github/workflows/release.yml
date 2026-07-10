@@ -90,8 +90,11 @@ jobs:
             ghcr.io/jcwearn/agent-orchestrator:${{ steps.version.outputs.tag }}
             ghcr.io/jcwearn/agent-orchestrator:${{ steps.version.outputs.major_minor }}
             ghcr.io/jcwearn/agent-orchestrator:sha-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # GHA cache is read-only for pull_request-triggered runs as of
+          # https://github.blog/changelog/2026-06-26-read-only-actions-cache-for-untrusted-triggers/
+          # so release builds cache via the registry instead.
+          cache-from: type=registry,ref=ghcr.io/jcwearn/agent-orchestrator:buildcache
+          cache-to: type=registry,ref=ghcr.io/jcwearn/agent-orchestrator:buildcache,mode=max
 
       - name: Create GitHub Release
         env:
