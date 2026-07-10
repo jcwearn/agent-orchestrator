@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	gogithub "github.com/google/go-github/v88/github"
+	gogithub "github.com/google/go-github/v89/github"
 )
 
 func TestListRepos_Unauthenticated(t *testing.T) {
