@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	gogithub "github.com/google/go-github/v89/github"
+	gogithub "github.com/google/go-github/v90/github"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
 	ghclient "github.com/jcwearn/agent-orchestrator/internal/github"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
