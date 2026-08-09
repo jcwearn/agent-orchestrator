@@ -108,7 +108,7 @@ func TestGitHubWebhook_IssuesLabeled_CreatesTask(t *testing.T) {
 	// Build the webhook payload.
 	event := gogithub.IssuesEvent{
 		Action: gogithub.Ptr("labeled"),
-		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Label:  &gogithub.Label{Name: "ai-task"},
 		Issue: &gogithub.Issue{
 			Number: gogithub.Ptr(42),
 			Title:  gogithub.Ptr("Add caching layer"),
@@ -196,7 +196,7 @@ func TestGitHubWebhook_IssuesLabeled_WrongLabel(t *testing.T) {
 
 	event := gogithub.IssuesEvent{
 		Action: gogithub.Ptr("labeled"),
-		Label:  &gogithub.Label{Name: gogithub.Ptr("bug")},
+		Label:  &gogithub.Label{Name: "bug"},
 		Issue: &gogithub.Issue{
 			Number: gogithub.Ptr(1),
 			Title:  gogithub.Ptr("Some bug"),
@@ -276,7 +276,7 @@ func TestGitHubWebhook_IssuesLabeled_TitleOnly(t *testing.T) {
 
 	event := gogithub.IssuesEvent{
 		Action: gogithub.Ptr("labeled"),
-		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Label:  &gogithub.Label{Name: "ai-task"},
 		Issue: &gogithub.Issue{
 			Number: gogithub.Ptr(5),
 			Title:  gogithub.Ptr("Fix login bug"),
@@ -335,8 +335,8 @@ func TestGitHubWebhook_IssuesOpened_WithAITaskLabel(t *testing.T) {
 			Title:  gogithub.Ptr("Implement feature X"),
 			Body:   gogithub.Ptr("Details about feature X."),
 			Labels: []*gogithub.Label{
-				{Name: gogithub.Ptr("ai-task")},
-				{Name: gogithub.Ptr("enhancement")},
+				{Name: "ai-task"},
+				{Name: "enhancement"},
 			},
 		},
 		Repo: &gogithub.Repository{
@@ -406,7 +406,7 @@ func TestGitHubWebhook_DuplicateIssueEvent_Deduplicated(t *testing.T) {
 			Number: gogithub.Ptr(20),
 			Title:  gogithub.Ptr("Dedup test"),
 			Body:   gogithub.Ptr("Testing dedup."),
-			Labels: []*gogithub.Label{{Name: gogithub.Ptr("ai-task")}},
+			Labels: []*gogithub.Label{{Name: "ai-task"}},
 		},
 		Repo: &gogithub.Repository{
 			Name:          gogithub.Ptr("testrepo"),
@@ -435,12 +435,12 @@ func TestGitHubWebhook_DuplicateIssueEvent_Deduplicated(t *testing.T) {
 	// Second event: "labeled" for the same issue — should be deduplicated.
 	labeledEvent := gogithub.IssuesEvent{
 		Action: gogithub.Ptr("labeled"),
-		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Label:  &gogithub.Label{Name: "ai-task"},
 		Issue: &gogithub.Issue{
 			Number: gogithub.Ptr(20),
 			Title:  gogithub.Ptr("Dedup test"),
 			Body:   gogithub.Ptr("Testing dedup."),
-			Labels: []*gogithub.Label{{Name: gogithub.Ptr("ai-task")}},
+			Labels: []*gogithub.Label{{Name: "ai-task"}},
 		},
 		Repo: &gogithub.Repository{
 			Name:          gogithub.Ptr("testrepo"),
@@ -623,7 +623,7 @@ func TestGitHubWebhook_AllowedUser_Accepted(t *testing.T) {
 
 	event := gogithub.IssuesEvent{
 		Action: gogithub.Ptr("labeled"),
-		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Label:  &gogithub.Label{Name: "ai-task"},
 		Issue: &gogithub.Issue{
 			Number: gogithub.Ptr(1),
 			Title:  gogithub.Ptr("Test task"),
@@ -669,7 +669,7 @@ func TestGitHubWebhook_DisallowedUser_Rejected(t *testing.T) {
 
 	event := gogithub.IssuesEvent{
 		Action: gogithub.Ptr("labeled"),
-		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Label:  &gogithub.Label{Name: "ai-task"},
 		Issue: &gogithub.Issue{
 			Number: gogithub.Ptr(1),
 			Title:  gogithub.Ptr("Test task"),
@@ -721,7 +721,7 @@ func TestGitHubWebhook_EmptyAllowedUsers_AllowsAll(t *testing.T) {
 
 	event := gogithub.IssuesEvent{
 		Action: gogithub.Ptr("labeled"),
-		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Label:  &gogithub.Label{Name: "ai-task"},
 		Issue: &gogithub.Issue{
 			Number: gogithub.Ptr(1),
 			Title:  gogithub.Ptr("Test task"),
@@ -781,7 +781,7 @@ func TestGitHubWebhook_DedupWithAPICreatedTask(t *testing.T) {
 	// Now simulate a webhook for the same issue.
 	event := gogithub.IssuesEvent{
 		Action: gogithub.Ptr("labeled"),
-		Label:  &gogithub.Label{Name: gogithub.Ptr("ai-task")},
+		Label:  &gogithub.Label{Name: "ai-task"},
 		Issue: &gogithub.Issue{
 			Number: gogithub.Ptr(50),
 			Title:  gogithub.Ptr("Do something"),
@@ -837,7 +837,7 @@ func TestGitHubWebhook_IssuesOpened_WithoutAITaskLabel(t *testing.T) {
 			Number: gogithub.Ptr(11),
 			Title:  gogithub.Ptr("Regular issue"),
 			Labels: []*gogithub.Label{
-				{Name: gogithub.Ptr("bug")},
+				{Name: "bug"},
 			},
 		},
 		Repo: &gogithub.Repository{

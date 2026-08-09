@@ -77,10 +77,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 			if issueTitle == "" {
 				issueTitle, issueBody = splitPromptForIssue(req.Prompt)
 			}
-			issue, _, err := s.githubClient.Issues.Create(r.Context(), owner, repo, &gogithub.IssueRequest{
-				Title:  &issueTitle,
+			issue, _, err := s.githubClient.Issues.Create(r.Context(), owner, repo, gogithub.CreateIssueRequest{
+				Title:  issueTitle,
 				Body:   &issueBody,
-				Labels: &[]string{aiTaskLabel},
+				Labels: []string{aiTaskLabel},
 			})
 			if err != nil {
 				s.logger.Error("auto-create github issue", "error", err)

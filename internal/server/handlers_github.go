@@ -181,8 +181,8 @@ func (s *Server) handlePullRequestEvent(r *http.Request, event *gogithub.PullReq
 		"owner", owner, "repo", repoName, "pr", prNumber, "issue", *task.GithubIssue)
 
 	state := "closed"
-	_, _, err = s.githubClient.Issues.Edit(r.Context(), owner, repoName, *task.GithubIssue,
-		&gogithub.IssueRequest{State: &state})
+	_, _, err = s.githubClient.Issues.Update(r.Context(), owner, repoName, *task.GithubIssue,
+		gogithub.UpdateIssueRequest{State: &state})
 	if err != nil {
 		return fmt.Errorf("closing issue %d: %w", *task.GithubIssue, err)
 	}
