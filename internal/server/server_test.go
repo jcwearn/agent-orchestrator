@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	gogithub "github.com/google/go-github/v89/github"
+	gogithub "github.com/google/go-github/v90/github"
 	"github.com/gorilla/websocket"
 	"github.com/jcwearn/agent-orchestrator/internal/coder"
 	ghclient "github.com/jcwearn/agent-orchestrator/internal/github"

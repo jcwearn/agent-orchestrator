@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	gogithub "github.com/google/go-github/v89/github"
+	gogithub "github.com/google/go-github/v90/github"
 )
 
 // Notifier posts status updates to GitHub issues.
@@ -184,8 +184,8 @@ func containsClosingKeyword(body, issueRef string) bool {
 // CloseIssue closes a GitHub issue.
 func (n *Notifier) CloseIssue(ctx context.Context, owner, repo string, issue int) error {
 	state := "closed"
-	_, _, err := n.client.Issues.Edit(ctx, owner, repo, issue,
-		&gogithub.IssueRequest{State: &state})
+	_, _, err := n.client.Issues.Update(ctx, owner, repo, issue,
+		gogithub.UpdateIssueRequest{State: &state})
 	return err
 }
 

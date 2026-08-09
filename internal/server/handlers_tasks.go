@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
-	gogithub "github.com/google/go-github/v89/github"
+	gogithub "github.com/google/go-github/v90/github"
 	"github.com/google/uuid"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
@@ -77,10 +77,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 			if issueTitle == "" {
 				issueTitle, issueBody = splitPromptForIssue(req.Prompt)
 			}
-			issue, _, err := s.githubClient.Issues.Create(r.Context(), owner, repo, &gogithub.IssueRequest{
-				Title:  &issueTitle,
+			issue, _, err := s.githubClient.Issues.Create(r.Context(), owner, repo, gogithub.CreateIssueRequest{
+				Title:  issueTitle,
 				Body:   &issueBody,
-				Labels: &[]string{aiTaskLabel},
+				Labels: []string{aiTaskLabel},
 			})
 			if err != nil {
 				s.logger.Error("auto-create github issue", "error", err)

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	gogithub "github.com/google/go-github/v89/github"
+	gogithub "github.com/google/go-github/v90/github"
 	"github.com/google/uuid"
 	"github.com/jcwearn/agent-orchestrator/internal/store"
 )
@@ -181,8 +181,8 @@ func (s *Server) handlePullRequestEvent(r *http.Request, event *gogithub.PullReq
 		"owner", owner, "repo", repoName, "pr", prNumber, "issue", *task.GithubIssue)
 
 	state := "closed"
-	_, _, err = s.githubClient.Issues.Edit(r.Context(), owner, repoName, *task.GithubIssue,
-		&gogithub.IssueRequest{State: &state})
+	_, _, err = s.githubClient.Issues.Update(r.Context(), owner, repoName, *task.GithubIssue,
+		gogithub.UpdateIssueRequest{State: &state})
 	if err != nil {
 		return fmt.Errorf("closing issue %d: %w", *task.GithubIssue, err)
 	}
